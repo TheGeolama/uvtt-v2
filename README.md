@@ -6,50 +6,30 @@ Welcome to the Universal VTT v2 (UVTT v2) specification architecture document. D
 
 The original v1 standard (`.dd2vtt` / `.df2vtt`) pioneered portable map data, but its foundational architecture presents severe limitations for modern WebGL and desktop engines:
 
-* 
-**Data Payload Bloat:** The v1 standard forces map makers to embed multi-megabyte images via Base64 strings directly inside a single JSON file. This bloats the payload by roughly 33% and forces the client's CPU to execute expensive string-parsing operations.
+* **Data Payload Bloat:** The v1 standard forces map makers to embed multi-megabyte images via Base64 strings directly inside a single JSON file. This bloats the payload by roughly 33% and forces the client's CPU to execute expensive string-parsing operations.
 
+* **The Flat Earth Assumption:** The v1 specification assumes a completely flat, infinite 2D plane.
 
-* 
-**The Flat Earth Assumption:** The v1 specification assumes a completely flat, infinite 2D plane.
+* **All-or-Nothing Geometry:** Legacy walls are absolute barriers. There is no native handling for one-way mirrors, transparent terrain, or height-restricted obstacles.
 
+* **Performance Blockages:** To simulate a curved room, v1 forces map makers to plot dozens of tiny, straight line segments. This drastically slows down VTT canvas rendering.
 
-* 
-**All-or-Nothing Geometry:** Legacy walls are absolute barriers. There is no native handling for one-way mirrors, transparent terrain, or height-restricted obstacles.
-
-
-* 
-**Performance Blockages:** To simulate a curved room, v1 forces map makers to plot dozens of tiny, straight line segments. This drastically slows down VTT canvas rendering.
-
-
-* 
-**The Interaction Gap:** The v1 standard lacks a native concept of mechanical mechanics, traps, or routing.
-
+* **The Interaction Gap:** The v1 standard lacks a native concept of mechanical mechanics, traps, or routing.
 
 
 ## The Solution: The UVTT v2 Paradigm
 
 The UVTT v2 specification is a complete architectural overhaul designed for hardware-accelerated engines (PixiJS, WebGL, Unity, etc.).
 
-* 
-**Binary Archive Container:** Transitioning to a ZIP archive as the native file format (`.uvtt2` or `.gvtt`) is a massive leap forward for asset management. Modern formats like `.epub` are essentially just zipped directories under the hood.
+* **Binary Archive Container:** Transitioning to a ZIP archive as the native file format (`.uvtt2` or `.gvtt`) is a massive leap forward for asset management. Modern formats like `.epub` are essentially just zipped directories under the hood.
 
+* **Verticality & 3D Spatial Awareness:** Every physical element now includes a height object containing bottom and top float properties. This applies to walls, overhead roof layers, and 3D positioning for lights.
 
-* 
-**Verticality & 3D Spatial Awareness:** Every physical element now includes a height object containing bottom and top float properties. This applies to walls, overhead roof layers, and 3D positioning for lights.
+* **Directional Line of Sight (LOS):** The standard utilizes left/right normal vectors relative to the direction a wall segment is drawn. Defining a wall from point A to B locks the mathematical half-spaces. The left side is mathematically defined as $\vec{n}_{left} = (y_1 - y_2, x_2 - x_1)$. The right side is defined as $\vec{n}_{right} = (y_2 - y_1, x_1 - x_2)$.
 
+* **Native Bézier Curves:** The standard adopts W3C SVG vector logic. It supports move, line, and bezier coordinate plotting.
 
-* 
-**Directional Line of Sight (LOS):** The standard utilizes left/right normal vectors relative to the direction a wall segment is drawn. Defining a wall from point A to B locks the mathematical half-spaces. The left side is mathematically defined as $\vec{n}_{left} = (y_1 - y_2, x_2 - x_1)$. The right side is defined as $\vec{n}_{right} = (y_2 - y_1, x_1 - x_2)$.
-
-
-* 
-**Native Bézier Curves:** The standard adopts W3C SVG vector logic. It supports move, line, and bezier coordinate plotting.
-
-
-* 
-**Spatial Event Routing:** Interactive spatial listeners are standardized for proximity triggers. This framework handles multi-level elevation changes and true portals.
-
+* **Spatial Event Routing:** Interactive spatial listeners are standardized for proximity triggers. This framework handles multi-level elevation changes and true portals.
 
 
 ---
@@ -72,25 +52,17 @@ campaign_dungeon.uvtt2/
 
 ### Architectural Benefits
 
+* **`manifest.json`:** Acts as the single source of truth for file metadata, versioning, and internal asset routing maps.
 * 
-**`manifest.json`:** Acts as the single source of truth for file metadata, versioning, and internal asset routing maps.
-
-
 * **`map.json`:** A clean, text-only data payload containing all geometry, flattened arrays, lighting nodes, and events.
 * 
-**`preview.webp`:** A highly compressed, low-resolution thumbnail placed at the root level. When a Gamemaster opens their map library, the client only fetches this tiny thumbnail.
+* **`preview.webp`:** A highly compressed, low-resolution thumbnail placed at the root level. When a Gamemaster opens their map library, the client only fetches this tiny thumbnail.
 
+* **`assets/`:** A dedicated directory that bundles raw binary files and keeps the data cleanly separated from the JSON.
 
-* 
-**`assets/`:** A dedicated directory that bundles raw binary files and keeps the data cleanly separated from the JSON.
+* **Streamable Parsing:** Go's native `archive/zip` package allows backend APIs to read the central directory without loading the entire archive into memory. An API can extract the JSON to chunk bounding boxes while parallelizing the extraction of high-resolution WebP files.
 
-
-* 
-**Streamable Parsing:** Go's native `archive/zip` package allows backend APIs to read the central directory without loading the entire archive into memory. An API can extract the JSON to chunk bounding boxes while parallelizing the extraction of high-resolution WebP files.
-
-
-* 
-**WebGL Culling:** Consistent clockwise winding ensures closed geometric shapes can leverage hardware-accelerated backface culling to skip drawing hidden sides.
+* **WebGL Culling:** Consistent clockwise winding ensures closed geometric shapes can leverage hardware-accelerated backface culling to skip drawing hidden sides.
 
 
 
