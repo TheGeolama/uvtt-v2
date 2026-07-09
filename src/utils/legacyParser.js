@@ -5,9 +5,17 @@
  */
 
 function base64ToBlob(base64, mimeType = 'image/png') {
+    // Strip potential data URI prefix to prevent InvalidCharacterError
+    if (typeof base64 === 'string' && base64.includes(',')) {
+        base64 = base64.split(',')[1];
+    }
+    // Remove whitespace/newlines which can also break atob()
+    base64 = base64.replace(/\s/g, '');
+
     const byteCharacters = atob(base64);
     const byteArrays = [];
 
+    // Process in chunks to bypass memory/URL limits
     for (let offset = 0; offset < byteCharacters.length; offset += 512) {
         const slice = byteCharacters.slice(offset, offset + 512);
         const byteArray = new Uint8Array(slice.length);
@@ -19,22 +27,40 @@ function base64ToBlob(base64, mimeType = 'image/png') {
     return new Blob(byteArrays, { type: mimeType });
 }
 
+/**
+ * Snaps a given coordinate to an existing vertex if it falls within the tolerance radius.
+ * This mathematically seals corners to prevent VTT light-leaks.
+ */
+function snapCoordinates(x, y, registry, tolerance = 0.05) {
+    for (const pt of registry) {
+        const dx = pt.x - x;
+        const dy = pt.y - y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance <= tolerance) {
+            return { x: pt.x, y: pt.y }; // Snap to the existing point
+        }
+    }
+    
+    // If no nearby point is found, register this as a new anchor point
+    const newPt = { x, y };
+    registry.push(newPt);
+    return newPt;
+}
+
 export async function upgradeLegacyMap(file) {
     const fileText = await file.text();
     const legacyData = JSON.parse(fileText);
 
-    let base64String = legacyData.image || ''; 
-    if (!base64String) throw new Error("Map file missing required 'image' Base64 data.");
+    // Safety check for missing or improperly formatted image payloads
+    if (!legacyData.image) throw new Error("Map file missing required 'image' Base64 data.");
 
-    if (typeof base64String === 'string' && base64String.includes(',')) {
-        base64String = base64String.split(',')[1];
-    }
-    if (base64String.indexOf('\n') !== -1 || base64String.indexOf(' ') !== -1) {
-        base64String = base64String.replace(/\s/g, '');
-    }
-
-    const imageBlob = base64ToBlob(base64String, 'image/png');
+    const imageBlob = base64ToBlob(legacyData.image, 'image/png');
     const imageObjectUrl = URL.createObjectURL(imageBlob);
+
+    // --- Vertex Snapping Initialization ---
+    const vertexRegistry = []; 
+    const SNAP_TOLERANCE = 0.05; // Map units
 
     // --- 1. Translate Standard Walls ---
     const upgradedWalls = [];
@@ -45,7 +71,11 @@ export async function upgradeLegacyMap(file) {
             const v2Path = wallSegment.map((point, ptIndex) => {
                 const px = point.x !== undefined ? point.x : point[0];
                 const py = point.y !== undefined ? point.y : point[1];
-                return { type: ptIndex === 0 ? "move" : "line", x: px, y: py };
+                
+                // Snap coordinates to seal geometry
+                const snapped = snapCoordinates(px, py, vertexRegistry, SNAP_TOLERANCE);
+
+                return { type: ptIndex === 0 ? "move" : "line", x: snapped.x, y: snapped.y };
             });
 
             upgradedWalls.push({
@@ -66,10 +96,13 @@ export async function upgradeLegacyMap(file) {
             const v2Path = portal.bounds.map((point, ptIndex) => {
                 const px = point.x !== undefined ? point.x : point[0];
                 const py = point.y !== undefined ? point.y : point[1];
-                return { type: ptIndex === 0 ? "move" : "line", x: px, y: py };
+                
+                // Snap coordinates so doors physically lock into surrounding walls
+                const snapped = snapCoordinates(px, py, vertexRegistry, SNAP_TOLERANCE);
+
+                return { type: ptIndex === 0 ? "move" : "line", x: snapped.x, y: snapped.y };
             });
 
-            // If closed is true, it's a door. Otherwise, a window.
             const portalType = portal.closed ? "door" : "window";
 
             upgradedPortals.push({
@@ -91,7 +124,7 @@ export async function upgradeLegacyMap(file) {
         },
         geometry: {
             walls: upgradedWalls,
-            portals: upgradedPortals, // Injects Portals into the Svelte Store!
+            portals: upgradedPortals,
             overhead: []
         },
         lights: [],

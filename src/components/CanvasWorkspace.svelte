@@ -24,10 +24,12 @@
   $: {
     const walls = $mapStore.manifest?.geometry?.walls || [];
     const portals = $mapStore.manifest?.geometry?.portals || [];
-    const selectedId = $mapStore.selectedItemId;
+
+    // Upgraded to handle the Multi-Select array
+    const selectedIds = $mapStore.selectedItemIds || [];
 
     if (vectorContainer) {
-      drawGeometry(walls, portals, selectedId);
+      drawGeometry(walls, portals, selectedIds);
     }
   }
 
@@ -58,7 +60,7 @@
     // Use pointertap on the background to deselect items cleanly
     interactionLayer.on("pointertap", (e) => {
       if ($mapStore.activeTool === "select" && e.target === interactionLayer) {
-        mapActions.selectItem(null);
+        mapActions.clearSelection();
       }
     });
 
@@ -100,7 +102,7 @@
     mapContainer.addChildAt(mapSprite, 0);
   }
 
-  function drawGeometry(walls, portals, selectedId) {
+  function drawGeometry(walls, portals, selectedIds) {
     // Safely destroy all previous children
     vectorContainer
       .removeChildren()
@@ -111,7 +113,9 @@
 
     const createClickablePath = (item, baseColor, width = 4) => {
       const vectorGroup = new PIXI.Container();
-      const isSelected = item.id === selectedId;
+
+      // Check if this specific item's ID is inside our multi-select array
+      const isSelected = selectedIds.includes(item.id);
 
       // 1. The Visual Line (No interaction, just pure styling)
       const visibleLine = new PIXI.Graphics();
@@ -121,8 +125,11 @@
       visibleLine.lineStyle(strokeWidth, strokeColor, 1);
       tracePath(visibleLine, item.path, gridScaleX, gridScaleY);
 
-      // 2. The Hit Nodes (THE ICEBERG FIX)
-      // PixiJS requires FILLS to register clicks. Strokes are ignored.
+      // --- Draw Directional Pointers ---
+      visibleLine.lineStyle(2, strokeColor, 1);
+      traceDirectionalPointers(visibleLine, item.path, gridScaleX, gridScaleY);
+
+      // 2. The Hit Nodes (PixiJS requires FILLS to register clicks)
       const hitArea = new PIXI.Graphics();
       hitArea.beginFill(0x000000, 0.001); // Magic 1% Fill
 
@@ -161,16 +168,20 @@
 
       hitArea.on("pointertap", (event) => {
         if ($mapStore.activeTool === "select") {
-          console.log("Vector Selected! ID:", item.id);
           event.stopPropagation();
-          mapActions.selectItem(item.id);
+
+          // Detect Shift key for multi-select arrays
+          const isMulti = event.nativeEvent.shiftKey;
+          mapActions.toggleSelection(item.id, isMulti);
         }
       });
 
       hitArea.on("pointerover", () => {
-        if ($mapStore.activeTool === "select" && !isSelected)
+        if ($mapStore.activeTool === "select" && !isSelected) {
           visibleLine.alpha = 0.5;
+        }
       });
+
       hitArea.on("pointerout", () => {
         visibleLine.alpha = 1.0;
       });
@@ -199,6 +210,7 @@
     pathArray.forEach((node, index) => {
       const px = node.x * scaleX;
       const py = node.y * scaleY;
+
       if (node.type === "move" || index === 0) {
         graphics.moveTo(px, py);
       } else if (node.type === "line") {
@@ -214,6 +226,42 @@
         );
       }
     });
+  }
+
+  function traceDirectionalPointers(graphics, pathArray, scaleX, scaleY) {
+    const POINTER_LENGTH = 15; // Fixed pixel length for the pointer tick
+
+    for (let i = 1; i < pathArray.length; i++) {
+      const prev = pathArray[i - 1];
+      const curr = pathArray[i];
+
+      // For now, we calculate normal vectors for straight lines
+      if (curr.type === "line") {
+        const p1x = prev.x * scaleX;
+        const p1y = prev.y * scaleY;
+        const p2x = curr.x * scaleX;
+        const p2y = curr.y * scaleY;
+
+        // 1. Find the exact midpoint
+        const midX = p1x + (p2x - p1x) / 2;
+        const midY = p1y + (p2y - p1y) / 2;
+
+        // 2. Calculate the Right-Hand Normal Vector
+        const dx = p2x - p1x;
+        const dy = p2y - p1y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+
+        if (length > 0) {
+          // Normalize and apply 90-degree clockwise rotation (-dy, dx)
+          const normalX = (-dy / length) * POINTER_LENGTH;
+          const normalY = (dx / length) * POINTER_LENGTH;
+
+          // 3. Draw the tick mark
+          graphics.moveTo(midX, midY);
+          graphics.lineTo(midX + normalX, midY + normalY);
+        }
+      }
+    }
   }
 
   function onDragStart(event) {
@@ -260,7 +308,7 @@
   });
 </script>
 
-<div bind:this={canvasContainer} class="pixi-workspace"></div>
+<div bind:this={canvasContainer} class="pixi-workspace" tabindex="0"></div>
 
 <style>
   .pixi-workspace {

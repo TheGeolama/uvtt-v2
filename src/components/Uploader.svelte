@@ -2,7 +2,6 @@
   import { mapActions } from "../stores/mapStore.js";
   import { upgradeLegacyMap } from "../utils/legacyParser.js";
 
-  // UI State Management
   let isDragging = false;
   let isProcessing = false;
   let errorMessage = "";
@@ -22,11 +21,9 @@
     isDragging = false;
     errorMessage = "";
 
-    // Extract the file from the drop event
     const file = event.dataTransfer.files[0];
     if (!file) return;
 
-    // Validate that the user dropped a supported legacy format
     const fileName = file.name.toLowerCase();
     if (
       !fileName.endsWith(".dd2vtt") &&
@@ -42,10 +39,7 @@
     isProcessing = true;
 
     try {
-      // 1. Pass the file to our legacy ingestion script
       const upgradedData = await upgradeLegacyMap(file);
-
-      // 2. Inject the extracted image and upgraded V2 manifest into the global store
       mapActions.setImage(
         upgradedData.imageUrl,
         upgradedData.imageBlob,
@@ -98,7 +92,6 @@
 </div>
 
 <style>
-  /* Full viewport drop zone */
   .uploader-container {
     display: flex;
     align-items: center;
@@ -111,13 +104,11 @@
     box-sizing: border-box;
   }
 
-  /* Active drag state styling */
   .uploader-container.dragging {
     border-color: #3a76cd;
     background-color: rgba(58, 118, 205, 0.08);
   }
 
-  /* Prevent child elements from interrupting drag events */
   .uploader-content {
     text-align: center;
     color: #b3b3b3;
