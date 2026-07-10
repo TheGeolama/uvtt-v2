@@ -11,22 +11,18 @@
     <Uploader />
   {:else}
     <Toolbar />
-    <ExportMenu />
     <CanvasWorkspace />
+    <ExportMenu />
   {/if}
 </main>
 
 <style>
-  /* Global resets to ensure the canvas and uploader take up the exact full screen */
-  :global(body, html) {
+  :global(body) {
     margin: 0;
     padding: 0;
-    width: 100%;
-    height: 100%;
     overflow: hidden;
-    background-color: #111111;
+    background-color: #1e1e1e;
     font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    color: #ffffff;
   }
 
   main {

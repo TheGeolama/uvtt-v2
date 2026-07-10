@@ -1,150 +1,174 @@
 <script>
-  import { mapActions } from "../stores/mapStore.js";
   import { upgradeLegacyMap } from "../utils/legacyParser.js";
+  import { mapActions } from "../stores/mapStore.js";
 
   let isDragging = false;
   let isProcessing = false;
-  let errorMessage = "";
+  let statusMessage = "Drop legacy .dd2vtt, .df2vtt, or folder here";
 
-  function onDragOver(event) {
-    event.preventDefault();
+  function handleDragEnter(e) {
+    e.preventDefault();
     isDragging = true;
   }
 
-  function onDragLeave(event) {
-    event.preventDefault();
+  function handleDragLeave() {
     isDragging = false;
   }
 
-  async function onDrop(event) {
-    event.preventDefault();
+  async function handleDrop(e) {
+    e.preventDefault();
     isDragging = false;
-    errorMessage = "";
 
-    const file = event.dataTransfer.files[0];
-    if (!file) return;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await processFiles(e.dataTransfer.files);
+    }
+  }
 
-    const fileName = file.name.toLowerCase();
-    if (
-      !fileName.endsWith(".dd2vtt") &&
-      !fileName.endsWith(".df2vtt") &&
-      !fileName.endsWith(".uvtt") &&
-      !fileName.endsWith(".json")
-    ) {
-      errorMessage =
-        "Please upload a valid legacy v1 (.dd2vtt, .df2vtt, or .uvtt) map file.";
-      return;
+  async function handleFileInput(e) {
+    if (e.target.files && e.target.files.length > 0) {
+      await processFiles(e.target.files);
+    }
+  }
+
+  async function processFiles(files) {
+    isProcessing = true;
+    const parsedMaps = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      statusMessage = `Parsing ${file.name} (${i + 1}/${files.length})...`;
+
+      try {
+        const { imageUrl, imageBlob, manifest } = await upgradeLegacyMap(file);
+
+        // Establish UVTT v2 filename
+        const extIndex = file.name.lastIndexOf(".");
+        const baseName =
+          extIndex !== -1 ? file.name.substring(0, extIndex) : file.name;
+        const v2Filename = `${baseName}.uvtt2z`;
+
+        parsedMaps.push({
+          filename: v2Filename,
+          originalName: file.name,
+          imageUrl,
+          imageBlob,
+          manifest,
+        });
+      } catch (err) {
+        console.error(`Error parsing ${file.name}:`, err);
+      }
     }
 
-    isProcessing = true;
-
-    try {
-      const upgradedData = await upgradeLegacyMap(file);
-      mapActions.setImage(
-        upgradedData.imageUrl,
-        upgradedData.imageBlob,
-        upgradedData.manifest,
-      );
-    } catch (error) {
-      console.error("Error parsing legacy map file:", error);
-      errorMessage =
-        "Failed to parse the map file. Ensure it is a valid v1 JSON structure.";
-    } finally {
+    if (parsedMaps.length > 0) {
+      statusMessage = "Compiling Catalog...";
+      mapActions.setCatalog(parsedMaps);
+    } else {
+      statusMessage = "No valid maps processed. Please try again.";
       isProcessing = false;
     }
   }
 </script>
 
 <div
-  class="uploader-container"
+  class="upload-container"
   class:dragging={isDragging}
-  on:dragover={onDragOver}
-  on:dragleave={onDragLeave}
-  on:drop={onDrop}
+  on:dragenter={handleDragEnter}
+  on:dragover={handleDragEnter}
+  on:dragleave={handleDragLeave}
+  on:drop={handleDrop}
 >
-  <div class="uploader-content">
-    <svg
-      viewBox="0 0 24 24"
-      width="64"
-      height="64"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    >
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-      <polyline points="17 8 12 3 7 8"></polyline>
-      <line x1="12" y1="3" x2="12" y2="15"></line>
-    </svg>
-
-    <h2>{isProcessing ? "Upgrading Map Data..." : "Drag & Drop Legacy Map"}</h2>
-    <p>
-      {isProcessing
-        ? "Flattening curves and optimizing WebGL textures. Please wait."
-        : "Supports .dd2vtt, .df2vtt, and .uvtt formats"}
-    </p>
-
-    {#if errorMessage}
-      <div class="error-banner">{errorMessage}</div>
-    {/if}
-  </div>
+  {#if isProcessing}
+    <div class="loader">
+      <div class="spinner"></div>
+      <h2>{statusMessage}</h2>
+      <p>Bypassing Base64 memory limits and normalizing vectors...</p>
+    </div>
+  {:else}
+    <div class="upload-box">
+      <h2>{statusMessage}</h2>
+      <p>
+        Upload a single map, or drop an entire folder to build a Multi-Level
+        Campaign Network.
+      </p>
+      <input
+        type="file"
+        id="fileElem"
+        multiple
+        accept=".dd2vtt,.df2vtt"
+        on:change={handleFileInput}
+        style="display:none;"
+      />
+      <button on:click={() => document.getElementById("fileElem").click()}
+        >Browse Files</button
+      >
+    </div>
+  {/if}
 </div>
 
 <style>
-  .uploader-container {
+  .upload-container {
+    width: 100%;
+    height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100vw;
-    height: 100vh;
     background-color: #1e1e1e;
-    border: 4px dashed #444;
-    transition: all 0.2s ease-in-out;
-    box-sizing: border-box;
+    color: #e0e0e0;
+    transition: background-color 0.2s ease;
   }
-
-  .uploader-container.dragging {
-    border-color: #3a76cd;
-    background-color: rgba(58, 118, 205, 0.08);
+  .upload-container.dragging {
+    background-color: #2d2d30;
   }
-
-  .uploader-content {
+  .upload-box {
+    border: 2px dashed #555;
+    border-radius: 12px;
+    padding: 60px;
     text-align: center;
-    color: #b3b3b3;
-    font-family: sans-serif;
-    pointer-events: none;
+    background-color: #252526;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   }
-
-  .uploader-content svg {
-    margin-bottom: 20px;
-    color: #3a76cd;
-    transition: transform 0.2s ease;
+  .upload-box.dragging {
+    border-color: #007acc;
+    background-color: #1e1e1e;
   }
-
-  .uploader-container.dragging .uploader-content svg {
-    transform: translateY(-10px);
+  button {
+    background-color: #007acc;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 20px;
+    transition: background-color 0.2s;
   }
-
-  .uploader-content h2 {
+  button:hover {
+    background-color: #005f9e;
+  }
+  h2 {
+    margin-bottom: 8px;
     color: #ffffff;
-    font-size: 28px;
-    margin: 0 0 12px 0;
-    font-weight: 600;
+  }
+  p {
+    color: #aaaaaa;
   }
 
-  .uploader-content p {
-    margin: 0;
-    font-size: 15px;
+  .loader {
+    text-align: center;
   }
-
-  .error-banner {
-    margin-top: 24px;
-    padding: 12px 16px;
-    background-color: rgba(255, 60, 60, 0.1);
-    color: #ff5555;
-    border: 1px solid #ff5555;
-    border-radius: 6px;
-    font-size: 14px;
+  .spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #333;
+    border-top-color: #007acc;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px auto;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
