@@ -1,387 +1,89 @@
-# Universal VTT v2 (UVTT v2) Open-Source Specification
-
-Welcome to the Universal VTT v2 (UVTT v2) specification architecture document. Designed for independent Virtual Tabletop (VTT) developers, map authoring tool engineers, and community modders, this specification addresses the legacy technical bottlenecks of the original v1 standard to unlock modern, high-performance rendering pipelines.
-
-## The Problem: Legacy v1 Bottlenecks
-
-The original v1 standard (`.dd2vtt` / `.df2vtt`) pioneered portable map data, but its foundational architecture presents severe limitations for modern WebGL and desktop engines:
-
-<<<<<<< HEAD
-- **Data Payload Bloat:** The v1 standard forces map makers to embed multi-megabyte images via Base64 strings directly inside a single JSON file. This bloats the payload by roughly 33% and forces the client's CPU to execute expensive string-parsing operations.
-
-- **The Flat Earth Assumption:** The v1 specification assumes a completely flat, infinite 2D plane.
-
-- **All-or-Nothing Geometry:** Legacy walls are absolute barriers. There is no native handling for one-way mirrors, transparent terrain, or height-restricted obstacles.
-
-- **Performance Blockages:** To simulate a curved room, v1 forces map makers to plot dozens of tiny, straight line segments. This drastically slows down VTT canvas rendering.
-
-- **The Interaction Gap:** The v1 standard lacks a native concept of mechanical mechanics, traps, or routing.
-
-## The Solution: The UVTT v2 Paradigm
-
-The UVTT v2 specification is a complete architectural overhaul designed for hardware-accelerated engines (PixiJS, WebGL, Unity, etc.).
-
-- **Binary Archive Container:** Transitioning to a ZIP archive as the native file format (`.uvtt2` or `.gvtt`) is a massive leap forward for asset management. Modern formats like `.epub` are essentially just zipped directories under the hood.
-
-- **Verticality & 3D Spatial Awareness:** Every physical element now includes a height object containing bottom and top float properties. This applies to walls, overhead roof layers, and 3D positioning for lights.
-
-- **Directional Line of Sight (LOS):** The standard utilizes left/right normal vectors relative to the direction a wall segment is drawn. Defining a wall from point A to B locks the mathematical half-spaces. The left side is mathematically defined as $\vec{n}_{left} = (y_1 - y_2, x_2 - x_1)$. The right side is defined as $\vec{n}_{right} = (y_2 - y_1, x_1 - x_2)$.
-
-- **Native Bézier Curves:** The standard adopts W3C SVG vector logic. It supports move, line, and bezier coordinate plotting.
-
-- **Spatial Event Routing:** Interactive spatial listeners are standardized for proximity triggers. This framework handles multi-level elevation changes and true portals.
+This `README.md` is designed to be the professional landing page for your repository. It establishes the UVTT v2 specification as a formal engineering standard, making it attractive to VTT engine developers and map-tool authors who are tired of the limitations of legacy formats.
 
 ---
 
-## Directory Archive Tree Layout
+# Universal VTT v2 (UVTT v2) Specification
 
-To best serve both map-making tools and ingest pipelines, the internal directory prioritizes streamability. A VTT server should be able to read the metadata without loading an 8K image into RAM.
+**The open-source, high-performance standard for interconnected TTRPG campaign mapping.**
+
+The UVTT v2 specification provides a modern, robust, and extensible framework for TTRPG map data. Designed to replace the legacy 2D-only flat formats (.dd2vtt / .df2vtt), UVTT v2 enables verticality, complex spatial triggers, hardware-accelerated rendering, and multi-file campaign networking.
+
+## 🚀 Why UVTT v2?
+
+Legacy V1 standards were ground-breaking, but they suffer from significant architectural bottlenecks. UVTT v2 solves these by treating maps not as static images, but as nodes within a **Topological Spatial Network**.
+
+### The Problem with v1
+
+- **Data Bloat:** Base64-encoded images embedded in JSON inflate payloads by ~33%, causing UI freezes and OOM errors in browser-based VTTs.
+- **The "Flat Earth" Assumption:** Legacy formats assume all maps are 2D planes, rendering vertical gameplay (multi-level dungeons) a nightmare to manage.
+- **Mathematical Inefficiency:** Jagged straight-line approximation for curved walls wastes GPU resources and creates visual artifacts.
+- **Fragmented Campaigns:** Maps are isolated islands. Linking a portal in Map A to Map B required manual GM intervention or third-party plug-ins.
+
+### The Solution: v2 Architecture
+
+- **Binary Archive Container (.uvtt2z):** A zipped directory that detaches heavy image assets from metadata. This enables streamability, lazy loading, and sub-second directory browsing.
+- **Material-Aware Geometry:** Directional Line-of-Sight (using the Right-Hand Rule) and explicit height-blocking properties for walls, terrain, and foliage.
+- **Spatial Routing:** A native URI-based system (`internal://` and `relative://`) allows for seamless, zero-lag transitions between maps and floors in mega-dungeons.
+- **Future-Proof Extensibility:** A `hardware_profile` block ensures the format can scale from WebGL2 to WebGPU without requiring a schema rewrite.
+
+---
+
+## 📂 Repository Structure
 
 ```text
-campaign_dungeon.uvtt2/
-├── manifest.json
-├── map.json
-├── preview.webp
-└── assets/
-    ├── base_map.webp
-    ├── roof_layer.webp
-    └── sfx_trap_click.ogg
+uvtt-v2-specification/
+├── .github/
+│   └── ISSUE_TEMPLATE/       # Forms for "Feature Proposals" or "Bug Reports"
+├── schemas/                  # Formal JSON Schema validation files
+│   ├── manifest.schema.json
+│   ├── geometry.schema.json
+│   └── entities.schema.json
+├── reference-parsers/        # Boilerplate code for community adoption
+│   ├── go/                   # Efficient Go archive reader/indexer
+│   └── typescript/           # Core JSON schema typings and SVG helpers
+├── RFCs/                     # Request for Comments for future upgrades
+├── CHANGELOG.md              # Clear version tracking (e.g., v2.0.0-rc1)
+├── CONTRIBUTING.md           # Governance and RFC submission guidelines
+└── README.md                 # Project documentation
 
-=======
-* **Data Payload Bloat:** The v1 standard forces map makers to embed multi-megabyte images via Base64 strings directly inside a single JSON file. This bloats the payload by roughly 33% and forces the client's CPU to execute expensive string-parsing operations.
-
-* **The Flat Earth Assumption:** The v1 specification assumes a completely flat, infinite 2D plane.
-
-* **All-or-Nothing Geometry:** Legacy walls are absolute barriers. There is no native handling for one-way mirrors, transparent terrain, or height-restricted obstacles.
-
-* **Performance Blockages:** To simulate a curved room, v1 forces map makers to plot dozens of tiny, straight line segments. This drastically slows down VTT canvas rendering.
-
-* **The Interaction Gap:** The v1 standard lacks a native concept of mechanical mechanics, traps, or routing.
-
-
-## The Solution: The UVTT v2 Paradigm
-
-The UVTT v2 specification is a complete architectural overhaul designed for hardware-accelerated engines (PixiJS, WebGL, Unity, etc.).
-
-* **Binary Archive Container:** Transitioning to a ZIP archive as the native file format (`.uvtt2` or `.gvtt`) is a massive leap forward for asset management. Modern formats like `.epub` are essentially just zipped directories under the hood.
-
-* **Verticality & 3D Spatial Awareness:** Every physical element now includes a height object containing bottom and top float properties. This applies to walls, overhead roof layers, and 3D positioning for lights.
-
-* **Directional Line of Sight (LOS):** The standard utilizes left/right normal vectors relative to the direction a wall segment is drawn. Defining a wall from point A to B locks the mathematical half-spaces. The left side is mathematically defined as $\vec{n}_{left} = (y_1 - y_2, x_2 - x_1)$. The right side is defined as $\vec{n}_{right} = (y_2 - y_1, x_1 - x_2)$.
-
-* **Native Bézier Curves:** The standard adopts W3C SVG vector logic. It supports move, line, and bezier coordinate plotting.
-
-* **Spatial Event Routing:** Interactive spatial listeners are standardized for proximity triggers. This framework handles multi-level elevation changes and true portals.
-
+```
 
 ---
 
-## Directory Archive Tree Layout
+## 🛠️ Feature Matrix
 
-To best serve both map-making tools and ingest pipelines, the internal directory prioritizes streamability. A VTT server should be able to read the metadata without loading an 8K image into RAM.
-
-```text
-campaign_dungeon.uvtt2/
-├── manifest.json
-├── map.json
-├── preview.webp
-└── assets/
-    ├── base_map.webp
-    ├── roof_layer.webp
-    └── sfx_trap_click.ogg
-
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-```
-
-### Architectural Benefits
-
-<<<<<<< HEAD
-- **`manifest.json`:** Acts as the single source of truth for file metadata, versioning, and internal asset routing maps.
-
-- **`map.json`:** A clean, text-only data payload containing all geometry, flattened arrays, lighting nodes, and events.
-
-- **`preview.webp`:** A highly compressed, low-resolution thumbnail placed at the root level. When a Gamemaster opens their map library, the client only fetches this tiny thumbnail.
-
-- **`assets/`:** A dedicated directory that bundles raw binary files and keeps the data cleanly separated from the JSON.
-
-- **Streamable Parsing:** JavaScript's zip.js library allows backend APIs to read the central directory without loading the entire archive into memory. An API can extract the JSON to chunk bounding boxes while parallelizing the extraction of high-resolution WebP files.
-
-- **WebGL Culling:** Consistent clockwise winding ensures closed geometric shapes can leverage hardware-accelerated backface culling to skip drawing hidden sides.
-=======
-* **`manifest.json`:** Acts as the single source of truth for file metadata, versioning, and internal asset routing maps.
-
-* **`map.json`:** A clean, text-only data payload containing all geometry, flattened arrays, lighting nodes, and events.
- 
-* **`preview.webp`:** A highly compressed, low-resolution thumbnail placed at the root level. When a Gamemaster opens their map library, the client only fetches this tiny thumbnail.
-
-* **`assets/`:** A dedicated directory that bundles raw binary files and keeps the data cleanly separated from the JSON.
-
-* **Streamable Parsing:** JavaScript's zip.js library allowd backend APIs to read the central directory without loading the entire archive into memory. An API can extract the JSON to chunk bounding boxes while parallelizing the extraction of high-resolution WebP files.
-
-* **WebGL Culling:** Consistent clockwise winding ensures closed geometric shapes can leverage hardware-accelerated backface culling to skip drawing hidden sides.
-
-
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
+| Feature              | Legacy v1            | UVTT v2                       |
+| -------------------- | -------------------- | ----------------------------- |
+| **Asset Delivery**   | Base64-in-JSON       | Zipped Directory (.uvtt2z)    |
+| **Grid Logic**       | Square Only          | Square, Hex, Isometric        |
+| **Verticality**      | Flat Plane           | 3D Bounds (Bottom/Top Z)      |
+| **Curves**           | Jagged Line Segments | Native SVG Bézier Paths       |
+| **Visibility**       | Symmetrical          | Directional (Right-Hand Rule) |
+| **Interoperability** | Disconnected Islands | Topological Spatial Network   |
+| **Weather**          | None                 | Bounded Particle Emitters     |
 
 ---
 
-## Production-Ready `map.json` Schema Instance
+## 📝 Governance & Contribution
 
-The following payload represents a fully validated UVTT v2 `map.json` mapping an advanced dungeon section. This includes resolution topology, material-aware terrain, directional illusions, Bezier vector curves, Z-axis illumination, and relative-offset teleportation events.
+The UVTT v2 specification is a **Living Document**. We welcome contributions from VTT engine developers and map-making tool authors.
 
-```json
-{
-  "format_version": "2.0.0",
-  "resolution": {
-<<<<<<< HEAD
-    "map_origin": { "x": 0.0, "y": 0.0 },
-    "grid_size": { "x": 70.0, "y": 70.0 },
-=======
-    "map_origin": {"x": 0.0, "y": 0.0},
-    "grid_size": {"x": 70.0, "y": 70.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-    "units_per_grid": 5.0,
-    "unit_name": "ft",
-    "topology": {
-      "type": "square",
-      "orientation": "flat_top",
-      "offset": "none",
-      "isometric_ratio": null
-    }
-  },
-  "geometry": {
-    "walls": [
-      {
-        "id": "wall_stone_linear_01",
-        "type": "standard",
-<<<<<<< HEAD
-        "height": { "bottom": 0.0, "top": 20.0 },
-=======
-        "height": {"bottom": 0.0, "top": 20.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "directional_blocks": {
-          "left_to_right": ["light", "sight", "movement"],
-          "right_to_left": ["light", "sight", "movement"]
-        },
-        "path": [
-<<<<<<< HEAD
-          { "type": "move", "x": 5.0, "y": 5.0 },
-          { "type": "line", "x": 25.0, "y": 5.0 }
-=======
-          {"type": "move", "x": 5.0, "y": 5.0},
-          {"type": "line", "x": 25.0, "y": 5.0}
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        ],
-        "states": {
-          "ethereal": false,
-          "disbelieved_by": []
-        }
-      },
-      {
-        "id": "wall_tree_canopy_01",
-        "type": "terrain",
-<<<<<<< HEAD
-        "height": { "bottom": 10.0, "top": 30.0 },
-=======
-        "height": {"bottom": 10.0, "top": 30.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "directional_blocks": {
-          "left_to_right": ["sight"],
-          "right_to_left": ["sight"]
-        },
-        "path": [
-<<<<<<< HEAD
-          { "type": "move", "x": 8.0, "y": 12.0 },
-          { "type": "line", "x": 12.0, "y": 16.0 }
-=======
-          {"type": "move", "x": 8.0, "y": 12.0},
-          {"type": "line", "x": 12.0, "y": 16.0}
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        ],
-        "states": {
-          "ethereal": false,
-          "disbelieved_by": []
-        }
-      },
-      {
-        "id": "wall_illusory_mirror_01",
-        "type": "illusory",
-<<<<<<< HEAD
-        "height": { "bottom": 0.0, "top": 10.0 },
-=======
-        "height": {"bottom": 0.0, "top": 10.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "directional_blocks": {
-          "left_to_right": ["light", "sight", "movement"],
-          "right_to_left": ["movement"]
-        },
-        "path": [
-<<<<<<< HEAD
-          { "type": "move", "x": 25.0, "y": 5.0 },
-          { "type": "line", "x": 25.0, "y": 15.0 }
-=======
-          {"type": "move", "x": 25.0, "y": 5.0},
-          {"type": "line", "x": 25.0, "y": 15.0}
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        ],
-        "states": {
-          "ethereal": false,
-          "disbelieved_by": ["char_id_rogue_01"]
-        }
-      },
-      {
-        "id": "room_circular_apse_01",
-        "type": "standard",
-<<<<<<< HEAD
-        "height": { "bottom": 0.0, "top": 20.0 },
-=======
-        "height": {"bottom": 0.0, "top": 20.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "directional_blocks": {
-          "left_to_right": ["light", "sight", "movement"],
-          "right_to_left": ["light", "sight", "movement"]
-        },
-        "path": [
-<<<<<<< HEAD
-          { "type": "move", "x": 25.0, "y": 15.0 },
-          {
-            "type": "bezier",
-            "cp1": { "x": 30.0, "y": 15.0 },
-            "cp2": { "x": 35.0, "y": 20.0 },
-            "to": { "x": 35.0, "y": 25.0 }
-=======
-          {"type": "move", "x": 25.0, "y": 15.0},
-          {
-            "type": "bezier",
-            "cp1": {"x": 30.0, "y": 15.0},
-            "cp2": {"x": 35.0, "y": 20.0},
-            "to": {"x": 35.0, "y": 25.0}
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-          }
-        ],
-        "states": {
-          "ethereal": false,
-          "disbelieved_by": []
-        }
-      }
-    ],
-    "portals": [
-      {
-        "id": "door_secret_bookshelf_01",
-        "type": "door",
-        "sub_type": "secret",
-        "state": "closed",
-<<<<<<< HEAD
-        "height": { "bottom": 0.0, "top": 8.0 },
-=======
-        "height": {"bottom": 0.0, "top": 8.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "directional_blocks": {
-          "left_to_right": ["light", "sight", "movement"],
-          "right_to_left": ["light", "sight", "movement"]
-        },
-        "line": {
-<<<<<<< HEAD
-          "p1": { "x": 10.0, "y": 5.0 },
-          "p2": { "x": 13.0, "y": 5.0 }
-=======
-          "p1": {"x": 10.0, "y": 5.0},
-          "p2": {"x": 13.0, "y": 5.0}
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        }
-      }
-    ]
-  },
-  "lights": [
-    {
-      "id": "light_sconce_magical_01",
-      "type": "directional",
-<<<<<<< HEAD
-      "position": { "x": 25.0, "y": 10.0, "z": 6.5 },
-=======
-      "position": {"x": 25.0, "y": 10.0, "z": 6.5},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-      "radius": {
-        "bright": 30.0,
-        "dim": 60.0
-      },
-      "cone": {
-        "rotation": 180.0,
-        "arc": 60.0
-      },
-      "color": "#4a90e2",
-      "intensity": 0.85,
-      "decay": "inverse_square",
-      "animation": {
-        "type": "pulse",
-        "speed": 2.0,
-        "intensity_variance": 0.15
-      }
-    }
-  ],
-  "events": [
-    {
-      "id": "trap_poison_dart_01",
-      "trigger": {
-        "type": "on_enter",
-        "region": [
-<<<<<<< HEAD
-          { "x": 12.0, "y": 8.0 },
-          { "x": 14.0, "y": 8.0 },
-          { "x": 14.0, "y": 10.0 },
-          { "x": 12.0, "y": 10.0 }
-=======
-          {"x": 12.0, "y": 8.0},
-          {"x": 14.0, "y": 8.0},
-          {"x": 14.0, "y": 10.0},
-          {"x": 12.0, "y": 10.0}
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        ],
-        "conditions": ["is_player_token"]
-      },
-      "actions": [
-        {
-          "target_id": "door_secret_bookshelf_01",
-          "property": "state",
-          "value": "locked"
-        }
-      ]
-    },
-    {
-      "id": "stairs_spiral_down_01",
-      "type": "teleport",
-      "trigger_bounds": {
-        "shape": "circle",
-<<<<<<< HEAD
-        "center": { "x": 35.0, "y": 25.0 },
-=======
-        "center": {"x": 35.0, "y": 25.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "radius": 2.0
-      },
-      "conditions": {
-        "requires_interaction": true,
-        "interaction_key": "use_stairs",
-        "allowed_modes": ["walking"]
-      },
-      "destination": {
-        "type": "intra_map",
-        "landing_mode": "relative_offset",
-<<<<<<< HEAD
-        "target_coordinates": { "x": 35.0, "y": 25.0, "z": -15.0 },
-        "offset": { "dx": 0.0, "dy": 2.0, "dz": -15.0 },
-=======
-        "target_coordinates": {"x": 35.0, "y": 25.0, "z": -15.0},
-        "offset": {"dx": 0.0, "dy": 2.0, "dz": -15.0},
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-        "target_rotation": 180.0,
-        "fade_transition": "crossfade_black"
-      }
-    }
-  ]
-}
-<<<<<<< HEAD
-=======
+### The RFC Pipeline
 
->>>>>>> 961aafde41098656c794bb13d5a742aeb6aaa14c
-```
+To propose a new feature (e.g., new atmospheric shaders, advanced lighting physics), please follow these steps:
+
+1. **Draft an RFC:** Create a markdown proposal in the `/RFCs` directory using the provided template.
+2. **Pull Request:** Submit your RFC via a Pull Request.
+3. **Community Review:** We evaluate based on backward compatibility, performance impact, and interoperability.
+
+### The Backward-Compatibility Contract
+
+Core features—including basic walls, portals, and landing zones—are immutable. Any new functionality (e.g., advanced WebGPU compute shaders) must be implemented as additive, optional properties within the `extensions` block to ensure that existing engines remain compliant.
+
+---
+
+## 🔗 Getting Started
+
+- **[View the Full Specification](https://www.google.com/search?q=schemas/)**
+- **[Download the Reference Upgrader Tool](https://www.google.com/search?q=https://github.com/TheGeolama/uvtt-v2-upgrader)** (Migrate legacy maps to v2).
+- **[Join the Discussion](https://www.google.com/search?q=https://github.com/TheGeolama/uvtt-v2-specification/issues)**
