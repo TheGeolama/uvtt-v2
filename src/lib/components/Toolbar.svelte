@@ -7,6 +7,8 @@
   let lightingPreview = $derived(mapStore.lightingPreview);
   let manifest = $derived(activeMap?.manifest);
 
+  let packageCompound = $state(false);
+
   let selectedItemIds = $derived(mapStore.selectedItemIds);
   let selectedItems = $derived(
     selectedItemIds
@@ -39,6 +41,7 @@
       })
       .filter(Boolean),
   );
+
   function selectTool(tool) {
     mapStore.setTool(tool);
   }
@@ -48,6 +51,12 @@
     selectedItems.forEach((item) => {
       mapStore.updateItemProperty(item.id, key, val);
     });
+  }
+
+  function triggerFileImport(e) {
+    const file = e.target.files[0];
+    if (file) mapStore.loadProjectFromFile(file);
+    e.target.value = null;
   }
 </script>
 
@@ -112,22 +121,62 @@
         <button
           class:active={lightingPreview}
           onclick={() => mapStore.toggleLightingPreview()}
-          aria-label="Toggle Lighting Preview"
+          aria-label="Toggle Lighting Preview"><span>🌓</span> Preview</button
         >
-          <span>🌓</span> Preview
-        </button>
       </div>
     </div>
 
     <div class="properties-panel">
       {#if selectedItems.length === 0}
         <div class="panel-section">
-          <h3>🌍 ENVIRONMENT CONFIG</h3>
-          <p class="helper-text">Global parameters for this VTT level.</p>
+          <h3>💾 FILE & EXPORT</h3>
+          <label class="checkbox-row" style="margin-bottom: 8px;">
+            <input type="checkbox" bind:checked={packageCompound} />
+            <span>Package Catalog as Compound Dungeon</span>
+          </label>
+          <div style="display: flex; gap: 8px; flex-direction: column;">
+            <button
+              class="action-btn wave"
+              onclick={() => mapStore.saveProject()}
+              >📦 Save Project (.uvtt-proj)</button
+            >
+            <label
+              class="action-btn"
+              style="background: #1e293b; color: #e2e8f0; text-align: center; cursor: pointer;"
+            >
+              📂 Load Project
+              <input
+                type="file"
+                accept=".uvtt-proj"
+                style="display: none;"
+                onchange={triggerFileImport}
+              />
+            </label>
+            <div style="display: flex; gap: 8px;">
+              <button
+                class="action-btn"
+                onclick={() =>
+                  packageCompound
+                    ? mapStore.exportCompoundVTT(true)
+                    : mapStore.exportLegacyV1()}>⏳ Export v1</button
+              >
+              <button
+                class="action-btn positive"
+                onclick={() =>
+                  packageCompound
+                    ? mapStore.exportCompoundVTT(false)
+                    : mapStore.exportVTT()}>📤 Compile v2</button
+              >
+            </div>
+          </div>
+          <p class="helper-text" style="margin-top: 5px;">
+            Your work is continuously auto-saved to your browser's local cache.
+          </p>
         </div>
 
-        {#if catalog.length > 1}
-          <div class="panel-section">
+        <div class="panel-section">
+          <h3>🌍 ENVIRONMENT CONFIG</h3>
+          {#if catalog.length > 1}
             <label>
               <span>📍 Level Switcher:</span>
               <select
@@ -139,10 +188,7 @@
                 {/each}
               </select>
             </label>
-          </div>
-        {/if}
-
-        <div class="panel-section">
+          {/if}
           <label>
             <span>Grid Size (Pixels):</span>
             <input
@@ -156,6 +202,85 @@
                 )}
             />
           </label>
+
+          <label>
+            <span>Grid Color:</span>
+            <input
+              type="color"
+              value={manifest.resolution?.grid_color || "#ffffff"}
+              onchange={(e) =>
+                mapStore.updateItemProperty(
+                  activeMap.id,
+                  "resolution.grid_color",
+                  e.target.value,
+                )}
+            />
+          </label>
+
+          <label>
+            <span>Main Grid Thickness (px):</span>
+            <div class="slider-row">
+              <input
+                type="range"
+                min="0"
+                max="10"
+                step="0.5"
+                value={manifest.resolution?.grid_line_width ?? 1.5}
+                oninput={(e) =>
+                  mapStore.updateItemProperty(
+                    activeMap.id,
+                    "resolution.grid_line_width",
+                    parseFloat(e.target.value),
+                  )}
+              />
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.5"
+                value={manifest.resolution?.grid_line_width ?? 1.5}
+                onchange={(e) =>
+                  mapStore.updateItemProperty(
+                    activeMap.id,
+                    "resolution.grid_line_width",
+                    parseFloat(e.target.value),
+                  )}
+              />
+            </div>
+          </label>
+
+          <label>
+            <span>Subgrid Thickness (px):</span>
+            <div class="slider-row">
+              <input
+                type="range"
+                min="0"
+                max="10"
+                step="0.5"
+                value={manifest.resolution?.subgrid_line_width ?? 1.0}
+                oninput={(e) =>
+                  mapStore.updateItemProperty(
+                    activeMap.id,
+                    "resolution.subgrid_line_width",
+                    parseFloat(e.target.value),
+                  )}
+              />
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.5"
+                value={manifest.resolution?.subgrid_line_width ?? 1.0}
+                onchange={(e) =>
+                  mapStore.updateItemProperty(
+                    activeMap.id,
+                    "resolution.subgrid_line_width",
+                    parseFloat(e.target.value),
+                  )}
+              />
+            </div>
+          </label>
+
           <label>
             <span>Image X Offset:</span>
             <input
@@ -184,13 +309,37 @@
           </label>
         </div>
 
-        {#if activeTool === "select"}
-          <div class="panel-section drafting-mode">
-            <p class="helper-text">
-              Select an item on the canvas to configure its specific properties.
-            </p>
-          </div>
-        {/if}
+        <div class="panel-section">
+          <h3>🎵 GLOBAL AUDIO</h3>
+          <label>
+            <span>Background Soundtrack (File):</span>
+            <input
+              type="text"
+              value={manifest.music?.track || ""}
+              onchange={(e) =>
+                mapStore.updateItemProperty(
+                  activeMap.id,
+                  "music.track",
+                  e.target.value,
+                )}
+              placeholder="e.g., battle_theme.ogg"
+            />
+          </label>
+          <label>
+            <span>Ambient Soundscape (File):</span>
+            <input
+              type="text"
+              value={manifest.ambience?.track || ""}
+              onchange={(e) =>
+                mapStore.updateItemProperty(
+                  activeMap.id,
+                  "ambience.track",
+                  e.target.value,
+                )}
+              placeholder="e.g., dripping_cave.ogg"
+            />
+          </label>
+        </div>
       {:else}
         {@const item = selectedItems[0]}
         <div class="panel-section">
@@ -246,21 +395,64 @@
               </select>
             </label>
             <label>
+              <span>Z-Axis Elevation (Grid Units):</span>
+              <input
+                type="number"
+                step="0.5"
+                value={item.position?.z ?? 0}
+                onchange={(e) =>
+                  updateProperty("position.z", parseFloat(e.target.value))}
+              />
+            </label>
+            <label>
               <span>Hex Color:</span>
               <input
                 type="color"
-                value={item.color || "#ffffff"}
-                onchange={(e) => updateProperty("color", e.target.value)}
+                value={item.properties?.color || "#ffffff"}
+                onchange={(e) =>
+                  updateProperty("properties.color", e.target.value)}
               />
+            </label>
+            <label>
+              <span>Intensity:</span>
+              <input
+                type="number"
+                step="0.1"
+                min="0.1"
+                max="5.0"
+                value={item.properties?.intensity ?? 1.0}
+                onchange={(e) =>
+                  updateProperty(
+                    "properties.intensity",
+                    parseFloat(e.target.value),
+                  )}
+              />
+            </label>
+            <label>
+              <span>Decay Model:</span>
+              <select
+                value={item.properties?.decay_model || "inverse_square"}
+                onchange={(e) =>
+                  updateProperty("properties.decay_model", e.target.value)}
+              >
+                <option value="inverse_square"
+                  >Inverse Square (Realistic)</option
+                >
+                <option value="linear">Linear Fade</option>
+                <option value="none">None (Solid Block)</option>
+              </select>
             </label>
             <label>
               <span>Bright Radius:</span>
               <input
                 type="number"
                 step="0.5"
-                value={item.bright_radius}
+                value={item.properties?.radius?.bright ?? 5}
                 onchange={(e) =>
-                  updateProperty("bright_radius", parseFloat(e.target.value))}
+                  updateProperty(
+                    "properties.radius.bright",
+                    parseFloat(e.target.value),
+                  )}
               />
             </label>
             <label>
@@ -268,34 +460,119 @@
               <input
                 type="number"
                 step="0.5"
-                value={item.dim_radius}
+                value={item.properties?.radius?.dim ?? 10}
                 onchange={(e) =>
-                  updateProperty("dim_radius", parseFloat(e.target.value))}
+                  updateProperty(
+                    "properties.radius.dim",
+                    parseFloat(e.target.value),
+                  )}
               />
             </label>
+
+            <label>
+              <span>Animation Profile:</span>
+              <select
+                value={item.properties?.animation?.profile || "none"}
+                onchange={(e) =>
+                  updateProperty(
+                    "properties.animation.profile",
+                    e.target.value,
+                  )}
+              >
+                <option value="none">Static Light</option>
+                <option value="flicker">Flicker (Torch/Fire)</option>
+                <option value="pulse">Pulse (Magic/Heartbeat)</option>
+                <option value="strobe">Strobe (Warning/Alarm)</option>
+              </select>
+            </label>
+            {#if item.properties?.animation?.profile !== "none"}
+              <div style="display: flex; gap: 8px;">
+                <label style="flex: 1; min-width: 0;">
+                  <span>Speed:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={item.properties?.animation?.speed ?? 0.5}
+                    onchange={(e) =>
+                      updateProperty(
+                        "properties.animation.speed",
+                        parseFloat(e.target.value),
+                      )}
+                  />
+                </label>
+                <label style="flex: 1; min-width: 0;">
+                  <span>Variance:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={item.properties?.animation?.intensity_variance ??
+                      0.2}
+                    onchange={(e) =>
+                      updateProperty(
+                        "properties.animation.intensity_variance",
+                        parseFloat(e.target.value),
+                      )}
+                  />
+                </label>
+              </div>
+            {/if}
 
             {#if item.type === "directional"}
               <label>
                 <span>Beam Rotation (Degrees):</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="360"
-                  value={item.rotation || 0}
-                  oninput={(e) =>
-                    updateProperty("rotation", parseFloat(e.target.value))}
-                />
+                <div class="slider-row">
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    value={item.properties?.rotation || 0}
+                    oninput={(e) =>
+                      updateProperty(
+                        "properties.rotation",
+                        parseFloat(e.target.value),
+                      )}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="360"
+                    value={item.properties?.rotation || 0}
+                    onchange={(e) =>
+                      updateProperty(
+                        "properties.rotation",
+                        parseFloat(e.target.value),
+                      )}
+                  />
+                </div>
               </label>
               <label>
                 <span>Beam Angle (Cone Width):</span>
-                <input
-                  type="range"
-                  min="10"
-                  max="360"
-                  value={item.cone_angle || 60}
-                  oninput={(e) =>
-                    updateProperty("cone_angle", parseFloat(e.target.value))}
-                />
+                <div class="slider-row">
+                  <input
+                    type="range"
+                    min="10"
+                    max="360"
+                    value={item.properties?.cone_angle || 60}
+                    oninput={(e) =>
+                      updateProperty(
+                        "properties.cone_angle",
+                        parseFloat(e.target.value),
+                      )}
+                  />
+                  <input
+                    type="number"
+                    min="10"
+                    max="360"
+                    value={item.properties?.cone_angle || 60}
+                    onchange={(e) =>
+                      updateProperty(
+                        "properties.cone_angle",
+                        parseFloat(e.target.value),
+                      )}
+                  />
+                </div>
               </label>
             {/if}
           {:else if item.category === "spawn"}
@@ -379,6 +656,248 @@
                 </select>
               </label>
             {/if}
+          {:else if item.category === "audio"}
+            <label>
+              <span>Audio Track / File:</span>
+              <input
+                type="text"
+                value={item.track || ""}
+                oninput={(e) => updateProperty("track", e.target.value)}
+                placeholder="e.g., roaring_fireplace.ogg"
+              />
+            </label>
+            <label>
+              <span>Base Volume (%):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={item.volume ?? 100}
+                  oninput={(e) =>
+                    updateProperty("volume", parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={item.volume ?? 100}
+                  onchange={(e) =>
+                    updateProperty("volume", parseFloat(e.target.value))}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Max Range (Fade to 0%):</span>
+              <input
+                type="number"
+                step="0.5"
+                min="0.5"
+                value={item.radius || 5}
+                onchange={(e) =>
+                  updateProperty("radius", parseFloat(e.target.value))}
+              />
+            </label>
+            <label>
+              <span>Inner Core (100% Volume):</span>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                value={item.inner_radius ?? 2.5}
+                onchange={(e) =>
+                  updateProperty("inner_radius", parseFloat(e.target.value))}
+              />
+            </label>
+            <label class="checkbox-row">
+              <input
+                type="checkbox"
+                checked={item.muffledByWalls ?? true}
+                onchange={(e) =>
+                  updateProperty("muffledByWalls", e.target.checked)}
+              />
+              <span>Muffled by Walls (Occlusion)</span>
+            </label>
+          {:else if item.category === "emitter"}
+            <label class="checkbox-row">
+              <input
+                type="checkbox"
+                checked={item.isGlobal ?? false}
+                onchange={(e) => updateProperty("isGlobal", e.target.checked)}
+              />
+              <span>Map-Wide (Global Emitter)</span>
+            </label>
+            <label>
+              <span>Emitter Category:</span>
+              <select
+                value={item.type || "weather"}
+                onchange={(e) => updateProperty("type", e.target.value)}
+              >
+                <option value="weather">Weather</option>
+                <option value="environment">Environment (Fire, Smoke)</option>
+                <option value="magic">Magic / Spells</option>
+                <option value="custom">Custom Particle</option>
+              </select>
+            </label>
+            {#if item.type === "weather"}
+              <label>
+                <span>Weather Style:</span>
+                <select
+                  value={item.style || "rain"}
+                  onchange={(e) => updateProperty("style", e.target.value)}
+                >
+                  <option value="rain">Rain</option>
+                  <option value="snow">Snow</option>
+                  <option value="fog">Fog / Mist</option>
+                  <option value="ash">Ash</option>
+                </select>
+              </label>
+            {:else if item.type === "custom"}
+              <label>
+                <span>Custom Graphic Asset (URL/Name):</span>
+                <input
+                  type="text"
+                  value={item.graphic || ""}
+                  oninput={(e) => updateProperty("graphic", e.target.value)}
+                  placeholder="e.g., sparks.png"
+                />
+              </label>
+            {/if}
+            <label>
+              <span>Z-Axis Elevation:</span>
+              <input
+                type="number"
+                step="0.5"
+                value={item.position?.z ?? 0}
+                onchange={(e) =>
+                  updateProperty("position.z", parseFloat(e.target.value))}
+              />
+            </label>
+            <label>
+              <span>Z-Index Layering:</span>
+              <select
+                value={item.layering || "above"}
+                onchange={(e) => updateProperty("layering", e.target.value)}
+              >
+                <option value="above">Above Roofs & Tokens</option>
+                <option value="below">Below Roofs & Tokens</option>
+              </select>
+            </label>
+            {#if item.type === "magic" || item.type === "custom"}
+              <label>
+                <span>Particle Tint / Color:</span>
+                <input
+                  type="color"
+                  value={item.tint || "#ffffff"}
+                  onchange={(e) => updateProperty("tint", e.target.value)}
+                />
+              </label>
+            {/if}
+            <label>
+              <span>Particle Scale (%):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="10"
+                  max="300"
+                  value={item.scale ?? 100}
+                  oninput={(e) =>
+                    updateProperty("scale", parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  min="10"
+                  max="300"
+                  value={item.scale ?? 100}
+                  onchange={(e) =>
+                    updateProperty("scale", parseFloat(e.target.value))}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Direction (Degrees):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="0"
+                  max="360"
+                  value={item.direction ?? 180}
+                  oninput={(e) =>
+                    updateProperty("direction", parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="360"
+                  value={item.direction ?? 180}
+                  onchange={(e) =>
+                    updateProperty("direction", parseFloat(e.target.value))}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Speed:</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={item.speed ?? 50}
+                  oninput={(e) =>
+                    updateProperty("speed", parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={item.speed ?? 50}
+                  onchange={(e) =>
+                    updateProperty("speed", parseFloat(e.target.value))}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Intensity (Density):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={item.intensity ?? 50}
+                  oninput={(e) =>
+                    updateProperty("intensity", parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={item.intensity ?? 50}
+                  onchange={(e) =>
+                    updateProperty("intensity", parseFloat(e.target.value))}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Variance (Fluctuation %):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={item.variance ?? 10}
+                  oninput={(e) =>
+                    updateProperty("variance", parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={item.variance ?? 10}
+                  onchange={(e) =>
+                    updateProperty("variance", parseFloat(e.target.value))}
+                />
+              </div>
+            </label>
           {:else}
             <p class="helper-text">
               Basic clone/translate capabilities active. Specific properties
@@ -518,19 +1037,42 @@
     cursor: pointer;
   }
 
-  input,
+  input[type="text"],
+  input[type="number"],
+  input[type="color"],
   select {
     background: #05080e;
     border: 1px solid #1e293b;
     color: #fff;
     padding: 6px;
     border-radius: 4px;
+    box-sizing: border-box;
+    width: 100%;
   }
+
   input[type="checkbox"] {
     cursor: pointer;
     width: 14px;
     height: 14px;
     accent-color: #00f0ff;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+  .slider-row input[type="range"] {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .slider-row input[type="number"] {
+    width: 50px;
+    flex-shrink: 0;
+    text-align: center;
+    padding: 4px;
   }
 
   button {

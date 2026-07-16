@@ -1,43 +1,40 @@
 <script>
-  import { onMount } from 'svelte';
-  import Uploader from '$components/Uploader.svelte';
-  import CanvasWorkspace from '$components/CanvasWorkspace.svelte';
-  import Toolbar from '$components/Toolbar.svelte';
-  import ExportMenu from '$components/ExportMenu.svelte';
-  import { mapStore } from '$stores/mapStore.svelte.js';
-  import { browser } from '$app/environment';
+  import { onMount } from "svelte";
+  import Uploader from "$components/Uploader.svelte";
+  import CanvasWorkspace from "$components/CanvasWorkspace.svelte";
+  import Toolbar from "$components/Toolbar.svelte";
+  import HistoryPanel from "$components/HistoryPanel.svelte";
+  import { mapStore } from "$stores/mapStore.svelte.js";
+  import { browser } from "$app/environment";
 
   // Svelte 5 Runes for reactive state & derived conditions
   let isClient = $state(false);
   let isLoaded = $derived(mapStore.catalog && mapStore.catalog.length > 0);
 
   // Svelte 5 $effect Rune handles client-side lifecycle safely
-  // This completely replaces Svelte 4's onMount and prevents SSR (Server-Side Rendering)
-  // compilation crashes when building with `@sveltejs/adapter-static` on GitHub Pages.
   $effect(() => {
     if (browser) {
       isClient = true;
-      console.log("🚀 Svelte 5 + SvelteKit Orchestrator initialized on the client-side.");
+      console.log(
+        "🚀 Svelte 5 + SvelteKit Orchestrator initialized on the client-side.",
+      );
     }
   });
 </script>
 
 <main class="app-container">
   {#if !isClient}
-    <!-- High-fidelity non-flash loading state before the client mounts -->
     <div class="ssr-loader">
       <div class="spinner"></div>
       <p>INITIALIZING WEBGPU PIPELINE...</p>
     </div>
   {:else if !isLoaded}
-    <!-- Master Drop Zone for single or bulk .dd2vtt / .df2vtt ingestion -->
     <Uploader />
   {:else}
-    <!-- Hardware-accelerated Level-Design Workspace -->
     <div class="workspace-wrapper">
       <CanvasWorkspace />
       <Toolbar />
-      <ExportMenu />
+      <HistoryPanel />
     </div>
   {/if}
 </main>
@@ -51,7 +48,16 @@
     overflow: hidden;
     background-color: #0f172a;
     color: #f8fafc;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family:
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      Oxygen,
+      Ubuntu,
+      Cantarell,
+      sans-serif;
   }
 
   .app-container {
@@ -88,8 +94,12 @@
   }
 
   @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
   }
 
   .ssr-loader p {

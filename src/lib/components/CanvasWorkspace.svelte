@@ -131,7 +131,6 @@
 
     const cw = window.innerWidth;
     const ch = window.innerHeight;
-
     scale = Math.min((cw - 100) / mapWidth, (ch - 100) / mapHeight, 1);
     panX = (cw - mapWidth * scale) / 2;
     panY = (ch - mapHeight * scale) / 2;
@@ -168,6 +167,11 @@
     const mapWidth = res.map_size[0] * gridSize;
     const mapHeight = res.map_size[1] * gridSize;
 
+    // Dynamic Grid Properties
+    const mainGridWidth = Number(res.grid_line_width) ?? 1.5;
+    const subGridWidth = Number(res.subgrid_line_width) ?? 1.0;
+    const gridColor = res.grid_color || "#ffffff";
+
     const subGridGfx = new PIXI.Graphics();
     gridContainer.addChild(subGridGfx);
     const subGridSize = gridSize / unitsPerGrid;
@@ -179,7 +183,7 @@
       subGridGfx.moveTo(0, y);
       subGridGfx.lineTo(mapWidth, y);
     }
-    subGridGfx.stroke({ width: 1, color: 0xffffff, alpha: 0.05 });
+    subGridGfx.stroke({ width: subGridWidth, color: gridColor, alpha: 0.05 });
 
     const mainGridGfx = new PIXI.Graphics();
     gridContainer.addChild(mainGridGfx);
@@ -191,25 +195,25 @@
       mainGridGfx.moveTo(0, y);
       mainGridGfx.lineTo(mapWidth, y);
     }
-    mainGridGfx.stroke({ width: 1.5, color: 0xffffff, alpha: 0.2 });
+    mainGridGfx.stroke({ width: mainGridWidth, color: gridColor, alpha: 0.2 });
 
     const selectedIds = new Set(mapStore.selectedItemIds);
     const entGfx = new PIXI.Graphics();
     entitiesContainer.addChild(entGfx);
 
     (manifest.entities?.lights || []).forEach((light) => {
-      const px = (Number(light.position.x) - originX) * gridSize;
-      const py = (Number(light.position.y) - originY) * gridSize;
+      const px = (Number(light.position?.x) - originX) * gridSize;
+      const py = (Number(light.position?.y) - originY) * gridSize;
       if (isNaN(px) || isNaN(py)) return;
 
-      const bRad = Number(light.bright_radius) * gridSize;
-      const dRad = Number(light.dim_radius) * gridSize;
-      const colorStr = light.color || "#ffffff";
+      const bRad = (Number(light.properties?.radius?.bright) || 5) * gridSize;
+      const dRad = (Number(light.properties?.radius?.dim) || 10) * gridSize;
+      const colorStr = light.properties?.color || "#ffffff";
       const isDir = light.type === "directional";
 
       if (isDir) {
-        const rot = Number(light.rotation) || 0;
-        const cone = Number(light.cone_angle) || 60;
+        const rot = Number(light.properties?.rotation) || 0;
+        const cone = Number(light.properties?.cone_angle) || 60;
         const startAngle = (rot - cone / 2) * (Math.PI / 180);
         const endAngle = (rot + cone / 2) * (Math.PI / 180);
 
@@ -277,7 +281,6 @@
           .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
     });
 
-    // THE FIX: Visual difference between Default (Green) and Secondary (Yellow) spawns
     (manifest.entities?.landing_zones || []).forEach((lz) => {
       const px = (Number(lz.coordinates?.[0]) - originX) * gridSize;
       const py = (Number(lz.coordinates?.[1]) - originY) * gridSize;
@@ -286,7 +289,7 @@
       const shape = lz.shape || "circle";
       const size = gridSize;
       const half = size / 2;
-      const fillColor = lz.is_default ? 0x22c55e : 0xeab308; // Green if Default, Yellow otherwise
+      const fillColor = lz.is_default ? 0x22c55e : 0xeab308;
 
       if (shape === "circle") {
         entGfx
@@ -452,11 +455,11 @@
       .closePath();
 
     (manifest.entities?.lights || []).forEach((light) => {
-      const lx = (Number(light.position.x) - originX) * gridSize;
-      const ly = (Number(light.position.y) - originY) * gridSize;
+      const lx = (Number(light.position?.x) - originX) * gridSize;
+      const ly = (Number(light.position?.y) - originY) * gridSize;
       if (isNaN(lx) || isNaN(ly)) return;
 
-      const radius = (Number(light.dim_radius) || 10) * gridSize;
+      const radius = (Number(light.properties?.radius?.dim) || 10) * gridSize;
 
       const angles = [];
       for (const seg of segments) {
@@ -487,23 +490,18 @@
           r_py = ly;
         const r_dx = dx * radius,
           r_dy = dy * radius;
-
         let minT1 = 1;
         let intersectPt = { x: lx + r_dx, y: ly + r_dy, angle: normA };
-
         for (const seg of segments) {
           const s_px = seg.p1.x,
             s_py = seg.p1.y;
           const s_dx = seg.p2.x - seg.p1.x,
             s_dy = seg.p2.y - seg.p1.y;
-
           const T2 = r_dx * s_dy - r_dy * s_dx;
           if (T2 === 0) continue;
-
           const T1 = (s_px - r_px) * s_dy - (s_py - r_py) * s_dx;
           const t1 = T1 / T2;
           const t2 = ((s_px - r_px) * r_dy - (s_py - r_py) * r_dx) / T2;
-
           if (t1 > 0 && t1 < minT1 && t2 >= 0 && t2 <= 1) {
             minT1 = t1;
             intersectPt = {
@@ -517,11 +515,12 @@
       }
 
       intersects.sort((a, b) => a.angle - b.angle);
-
       if (intersects.length > 0) {
         if (light.type === "directional") {
-          const rot = (Number(light.rotation) || 0) * (Math.PI / 180);
-          const cone = (Number(light.cone_angle) || 60) * (Math.PI / 180);
+          const rot =
+            (Number(light.properties?.rotation) || 0) * (Math.PI / 180);
+          const cone =
+            (Number(light.properties?.cone_angle) || 60) * (Math.PI / 180);
           const startAngle = rot - cone / 2;
           const endAngle = rot + cone / 2;
 
@@ -547,7 +546,6 @@
         }
       }
     });
-
     shadowGfx.fill({ color: 0x000000, alpha: 0.85 });
   }
 
@@ -608,14 +606,12 @@
         const y2 = Number(wall.path[i + 1].y);
         const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
         if (l2 === 0) continue;
-
         let t = Math.max(
           0,
           Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2),
         );
         const projX = x1 + t * (x2 - x1);
         const projY = y1 + t * (y2 - y1);
-
         const distSq = (px - projX) ** 2 + (py - projY) ** 2;
         if (distSq < closestDist) {
           closestDist = distSq;
@@ -629,7 +625,6 @@
   function getGridCoordinates(clientX, clientY, e_shiftKey) {
     if (!activeMap)
       return { exactX: 0, exactY: 0, snapX: 0, snapY: 0, gridSize: 70 };
-
     const rect = canvasContainer.getBoundingClientRect();
     const rawX = clientX - rect.left;
     const rawY = clientY - rect.top;
@@ -642,20 +637,33 @@
     );
     const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
     const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
-
     const exactX = (rawX - panX) / scale / gridSize + originX;
     const exactY = (rawY - panY) / scale / gridSize + originY;
 
     let snapX = exactX;
     let snapY = exactY;
-
     let isVectorSnapped = false;
 
-    if (activeTool === "spawn" && !e_shiftKey) {
+    // Detect if we are using or dragging a free-place tool
+    let isFreeTool = ["light", "audio", "emitter"].includes(activeTool);
+    if (activeTool === "select" && draggedItemId) {
+      const m = manifest;
+      const isFreeEntity =
+        m.entities?.lights?.some((i) => i.id === draggedItemId) ||
+        m.entities?.audio?.zones?.some((i) => i.id === draggedItemId) ||
+        m.entities?.emitters?.some((i) => i.id === draggedItemId);
+      if (isFreeEntity) isFreeTool = true;
+    }
+
+    // Free tools default to NO snap. Shift key ENABLES snap.
+    // Structural tools default to snap. Shift key DISABLES snap.
+    const shouldSnap = isFreeTool ? e_shiftKey : !e_shiftKey;
+
+    if (activeTool === "spawn" && shouldSnap) {
       snapX = Math.floor(exactX) + 0.5;
       snapY = Math.floor(exactY) + 0.5;
       isVectorSnapped = true;
-    } else if (activeTool === "portal" && !e_shiftKey) {
+    } else if (activeTool === "portal" && shouldSnap) {
       const snapDist = 0.5 / unitsPerGrid;
       const edgeSnap = getVectorSnapPoint(
         exactX,
@@ -670,7 +678,7 @@
       }
     }
 
-    if (!e_shiftKey && !isVectorSnapped) {
+    if (shouldSnap && !isVectorSnapped) {
       snapX = Math.round(exactX * unitsPerGrid) / unitsPerGrid;
       snapY = Math.round(exactY * unitsPerGrid) / unitsPerGrid;
     }
@@ -680,7 +688,6 @@
 
   function handlePointerDown(e) {
     if (!viewportContainer || !activeMap) return;
-
     if (e.button === 1 || (e.button === 2 && draftingPath.length === 0)) {
       isPanning = true;
       dragStart = { x: e.clientX, y: e.clientY };
@@ -700,6 +707,46 @@
       const coords = getGridCoordinates(e.clientX, e.clientY, e.shiftKey);
       currentGridX = coords.snapX;
       currentGridY = coords.snapY;
+
+      if (e.altKey && activeTool === "select") {
+        let splitOccurred = false;
+        ["walls", "portals"].forEach((cat) => {
+          activeMap.manifest.geometry[cat]?.forEach((item) => {
+            if (splitOccurred || !item.path) return;
+            for (let i = 0; i < item.path.length - 1; i++) {
+              const x1 = Number(item.path[i].x);
+              const y1 = Number(item.path[i].y);
+              const x2 = Number(item.path[i + 1].x);
+              const y2 = Number(item.path[i + 1].y);
+              const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+              if (l2 === 0) continue;
+              let t = Math.max(
+                0,
+                Math.min(
+                  1,
+                  ((coords.exactX - x1) * (x2 - x1) +
+                    (coords.exactY - y1) * (y2 - y1)) /
+                    l2,
+                ),
+              );
+              const projX = x1 + t * (x2 - x1);
+              const projY = y1 + t * (y2 - y1);
+              const distSq =
+                (coords.exactX - projX) ** 2 + (coords.exactY - projY) ** 2;
+              if (distSq < (15 / scale / coords.gridSize) ** 2) {
+                item.path.splice(i + 1, 0, {
+                  x: coords.exactX,
+                  y: coords.exactY,
+                });
+                splitOccurred = true;
+                mapStore.pushHistory("Split Vector");
+                return;
+              }
+            }
+          });
+        });
+        if (splitOccurred) return;
+      }
 
       if (activeTool === "wall" || activeTool === "portal") {
         draftingPath = [...draftingPath, { x: currentGridX, y: currentGridY }];
@@ -732,7 +779,6 @@
         const manifest = activeMap.manifest;
         let closestItem = null;
         let minGridDistSq = (15 / scale / coords.gridSize) ** 2;
-
         const checkEntityCollision = (items, getPos) => {
           for (const item of items) {
             const pos = getPos(item);
@@ -745,7 +791,6 @@
             }
           }
         };
-
         const checkGeometryCollision = (items) => {
           for (const item of items) {
             const path = item.path || [];
@@ -777,7 +822,6 @@
             }
           }
         };
-
         checkEntityCollision(manifest.entities?.lights || [], (i) => ({
           x: Number(i.position?.x),
           y: Number(i.position?.y),
@@ -798,7 +842,6 @@
           x: Number(i.position?.x),
           y: Number(i.position?.y),
         }));
-
         checkGeometryCollision(manifest.geometry?.walls || []);
         checkGeometryCollision(manifest.geometry?.portals || []);
 
@@ -825,11 +868,9 @@
     }
 
     if (!activeMap) return;
-
     const coords = getGridCoordinates(e.clientX, e.clientY, e.shiftKey);
     currentGridX = coords.snapX;
     currentGridY = coords.snapY;
-
     if (activeTool === "wall" || activeTool === "portal") {
       draftingPreview = { x: currentGridX, y: currentGridY };
       drawDraftingLayer();
@@ -861,7 +902,6 @@
     const pointerY = e.clientY;
     const zoom = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = scale * zoom;
-
     panX = pointerX - (pointerX - panX) * (newScale / scale);
     panY = pointerY - (pointerY - panY) * (newScale / scale);
     scale = newScale;
@@ -870,6 +910,18 @@
 
   function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) mapStore.redo();
+      else mapStore.undo();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      mapStore.redo();
+      return;
+    }
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       mapStore.copySelected();
