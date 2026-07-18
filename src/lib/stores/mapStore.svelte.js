@@ -90,6 +90,7 @@ function verifyAndCleanManifest(rawManifest) {
             m.entities.events = m.entities.events.filter(ev => {
                 if (!ev.trigger_bounds || !ev.trigger_bounds.center || !isNum(ev.trigger_bounds.center.x) || !isNum(ev.trigger_bounds.center.y)) return false;
                 if (!isNum(ev.trigger_bounds.radius)) ev.trigger_bounds.radius = 1;
+                if (!ev.activation || typeof ev.activation !== 'string') ev.activation = 'proximity';
                 return true;
             });
         }
@@ -118,103 +119,145 @@ function verifyAndCleanManifest(rawManifest) {
     return m;
 }
 
-export const mapStore = createMapStore();
+class MapStore {
+    activeMapId = $state(null);
+    catalog = $state([]);
+    updateTrigger = $state(0);
+    selectedItemIds = $state([]);
+    clipboard = $state([]);
+    lightingPreview = $state(false);
+    activeTool = $state("select");
+    draftingMode = $state("straight"); 
+    audioBlobs = $state({}); 
 
-function createMapStore() {
-    let activeMapId = $state(null);
-    let catalog = $state([]);
-    let updateTrigger = $state(0);
-    let selectedItemIds = $state([]);
-    let clipboard = $state([]);
-    let lightingPreview = $state(false);
-    let activeTool = $state("select");
-    let draftingMode = $state("straight"); 
-    let audioBlobs = $state({}); 
+    _saveTimeout = null;
 
-    let _saveTimeout = null;
-
-    loadFromDB('autosave').then(saved => {
-        if (saved && saved.catalog && saved.catalog.length > 0) {
-            catalog = saved.catalog;
-            activeMapId = saved.activeMapId || saved.catalog[0].id;
-            updateTrigger++;
-        }
+    defaultSettings = $state({
+        wall: { properties: { type: 'standard' } },
+        portal: { properties: { type: 'door', state: 'closed' } },
+        roof: { properties: { tint: '#475569', opacity: 100, hidden: false } },
+        light: { type: 'point', position: { z: 0 }, properties: { color: '#ffffff', intensity: 1.0, decay_model: 'inverse_square', radius: { bright: 5.0, dim: 10.0 }, animation: { profile: 'none', speed: 0.5, intensity_variance: 0.2 }, rotation: 0, cone_angle: 60 } },
+        spawn: { name: 'New Spawn', shape: 'circle', is_default: false },
+        event: { name: 'New Event', eventType: 'Trap/Door Trigger', activation: 'proximity', trigger_bounds: { radius: 0.5 }, targetSpawnId: "", autoCreateMatch: false, targetFloorId: "" },
+        audio: { track: "", volume: 100, radius: 5, inner_radius: 2.5, muffledByWalls: true },
+        emitter: { type: 'weather', style: 'rain', isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100, direction: 180, speed: 50, intensity: 50, variance: 10, graphic: '', position: { z: 0 } }
     });
 
-    return {
-        get activeMapId() { return activeMapId; },
-        set activeMapId(id) { activeMapId = id; },
-        get catalog() { return catalog; },
-        get updateTrigger() { return updateTrigger; },
-        get redrawTick() { return updateTrigger; },
-        get selectedItemIds() { return selectedItemIds; },
-        set selectedItemIds(ids) { selectedItemIds = ids; },
-        get lightingPreview() { return lightingPreview; },
-        get activeTool() { return activeTool; },
-        get audioBlobs() { return audioBlobs; },
+    constructor() {
+        loadFromDB('autosave').then(saved => {
+            if (saved && saved.catalog && saved.catalog.length > 0) {
+                this.catalog = saved.catalog;
+                this.activeMapId = saved.activeMapId || saved.catalog[0].id;
+                this.updateTrigger++;
+            }
+        });
+    }
 
-        get activeMap() {
-            return catalog.find(m => m.id === activeMapId) || null;
-        },
+    get activeMap() { return this.catalog.find(m => m.id === this.activeMapId) || null; }
+    get redrawTick() { return this.updateTrigger; }
 
-        // --- IO & PERSISTENCE ---
-        triggerAutoSave() {
-            clearTimeout(_saveTimeout);
-            _saveTimeout = setTimeout(async () => {
-                const dataToSave = JSON.parse(JSON.stringify({
-                    catalog,
-                    activeMapId
-                }));
-                await saveToDB('autosave', dataToSave);
-            }, 2000);
-        },
-
-        downloadBlob(filename, blob) {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a); 
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 1000); 
-        },
-
-        downloadJSON(filename, data) {
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            this.downloadBlob(filename, blob);
-        },
-
-        saveProject() {
-            const projectData = JSON.parse(JSON.stringify({
-                catalog,
-                activeMapId
+    // --- IO & PERSISTENCE ---
+    triggerAutoSave() {
+        clearTimeout(this._saveTimeout);
+        this._saveTimeout = setTimeout(async () => {
+            const dataToSave = JSON.parse(JSON.stringify({
+                catalog: this.catalog,
+                activeMapId: this.activeMapId
             }));
-            this.downloadJSON('my_map.uvtt-proj', projectData);
-        },
+            await saveToDB('autosave', dataToSave);
+        }, 2000);
+    }
 
-        closeProject() {
-            catalog = [];
-            activeMapId = null;
-            selectedItemIds = [];
-            clipboard = [];
-            updateTrigger++;
-            this.triggerAutoSave();
-        },
+    downloadBlob(filename, blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a); 
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000); 
+    }
 
-        exportVTT() {
-            if (!this.activeMap) return;
-            const cleanManifest = verifyAndCleanManifest(this.activeMap.manifest);
-            this.downloadJSON(`${this.activeMap.filename || 'export'}.uvtt`, cleanManifest);
-        },
+    downloadJSON(filename, data) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        this.downloadBlob(filename, blob);
+    }
 
-        exportLegacyV1() {
-            if (!this.activeMap) return;
-            const cleanManifest = verifyAndCleanManifest(this.activeMap.manifest);
-            
-            if (cleanManifest.entities) {
-                if (cleanManifest.entities.lights) {
-                    cleanManifest.entities.lights = cleanManifest.entities.lights.map(l => {
+    saveProject() {
+        const projectData = JSON.parse(JSON.stringify({
+            catalog: this.catalog,
+            activeMapId: this.activeMapId
+        }));
+        this.downloadJSON('my_map.uvtt-proj', projectData);
+    }
+
+    closeProject() {
+        this.catalog = [];
+        this.activeMapId = null;
+        this.selectedItemIds = [];
+        this.clipboard = [];
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    exportVTT() {
+        if (!this.activeMap) return;
+        const cleanManifest = verifyAndCleanManifest(this.activeMap.manifest);
+        this.downloadJSON(`${this.activeMap.filename || 'export'}.uvtt`, cleanManifest);
+    }
+
+    exportLegacyV1() {
+        if (!this.activeMap) return;
+        const cleanManifest = verifyAndCleanManifest(this.activeMap.manifest);
+        
+        if (cleanManifest.entities) {
+            if (cleanManifest.entities.lights) {
+                cleanManifest.entities.lights = cleanManifest.entities.lights.map(l => {
+                    const v1Light = { id: l.id };
+                    if (l.position) v1Light.position = [l.position.x, l.position.y];
+                    if (l.properties) {
+                        v1Light.color = l.properties.color || "#ffffff";
+                        v1Light.range = l.properties.radius?.dim || 10;
+                        v1Light.intensity = l.properties.intensity || 1.0;
+                    }
+                    return v1Light;
+                });
+            }
+            if (cleanManifest.entities.landing_zones) {
+                cleanManifest.entities.spawns = cleanManifest.entities.landing_zones;
+                delete cleanManifest.entities.landing_zones;
+            }
+            if (cleanManifest.entities.events) {
+                cleanManifest.entities.events = cleanManifest.entities.events.map(ev => {
+                    if (ev.trigger_bounds && ev.trigger_bounds.center) {
+                        ev.x = ev.trigger_bounds.center.x;
+                        ev.y = ev.trigger_bounds.center.y;
+                        delete ev.trigger_bounds;
+                    }
+                    return ev;
+                });
+            }
+        }
+        this.downloadJSON(`${this.activeMap.filename || 'export'}_v1_legacy.uvtt`, cleanManifest);
+    }
+
+    exportCompoundVTT(isLegacy = false) {
+        if (this.catalog.length === 0) return;
+        const compoundManifest = {
+            type: "compound_dungeon",
+            export_version: isLegacy ? 1 : 2,
+            levels: []
+        };
+
+        this.catalog.forEach(mapDef => {
+            let levelManifest = verifyAndCleanManifest(mapDef.manifest);
+            levelManifest.level_id = mapDef.id;
+            levelManifest.level_name = mapDef.filename || "Unnamed Level";
+
+            if (isLegacy && levelManifest.entities) {
+                if (levelManifest.entities.lights) {
+                    levelManifest.entities.lights = levelManifest.entities.lights.map(l => {
                         const v1Light = { id: l.id };
                         if (l.position) v1Light.position = [l.position.x, l.position.y];
                         if (l.properties) {
@@ -225,12 +268,12 @@ function createMapStore() {
                         return v1Light;
                     });
                 }
-                if (cleanManifest.entities.landing_zones) {
-                    cleanManifest.entities.spawns = cleanManifest.entities.landing_zones;
-                    delete cleanManifest.entities.landing_zones;
+                if (levelManifest.entities.landing_zones) {
+                    levelManifest.entities.spawns = levelManifest.entities.landing_zones;
+                    delete levelManifest.entities.landing_zones;
                 }
-                if (cleanManifest.entities.events) {
-                    cleanManifest.entities.events = cleanManifest.entities.events.map(ev => {
+                if (levelManifest.entities.events) {
+                    levelManifest.entities.events = levelManifest.entities.events.map(ev => {
                         if (ev.trigger_bounds && ev.trigger_bounds.center) {
                             ev.x = ev.trigger_bounds.center.x;
                             ev.y = ev.trigger_bounds.center.y;
@@ -240,795 +283,911 @@ function createMapStore() {
                     });
                 }
             }
-            this.downloadJSON(`${this.activeMap.filename || 'export'}_v1_legacy.uvtt`, cleanManifest);
-        },
+            compoundManifest.levels.push(levelManifest);
+        });
 
-        exportCompoundVTT(isLegacy = false) {
-            if (catalog.length === 0) return;
-            const compoundManifest = {
-                type: "compound_dungeon",
-                export_version: isLegacy ? 1 : 2,
-                levels: []
+        this.downloadJSON(`Compound_Dungeon_${isLegacy ? 'v1' : 'v2'}.uvtt`, compoundManifest);
+    }
+
+    async exportSecureVTT(isCompound = false) {
+        try {
+            if (!window.crypto || !window.crypto.subtle) {
+                alert("SECURITY ERROR: The Web Crypto API requires a Secure Context. You must view this page via HTTPS or 'localhost'.");
+                return;
+            }
+
+            if (!this.activeMap && !isCompound) return;
+            if (isCompound && this.catalog.length === 0) return;
+
+            const baseName = isCompound ? 'Compound_Dungeon' : (this.activeMap.filename || 'export');
+            const internalZip = new JSZip();
+
+            const safeBase64ToBlob = (base64, mime) => {
+                const binary = atob(base64);
+                const array = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    array[i] = binary.charCodeAt(i);
+                }
+                return new Blob([array], { type: mime });
             };
 
-            catalog.forEach(mapDef => {
-                let levelManifest = verifyAndCleanManifest(mapDef.manifest);
-                levelManifest.level_id = mapDef.id;
-                levelManifest.level_name = mapDef.filename || "Unnamed Level";
+            const bundleMapImage = async (mapDef, manifestToUpdate) => {
+                const sourceData = mapDef.imageUrl || mapDef.manifest.image;
+                if (!sourceData) return;
 
-                if (isLegacy && levelManifest.entities) {
-                    if (levelManifest.entities.lights) {
-                        levelManifest.entities.lights = levelManifest.entities.lights.map(l => {
-                            const v1Light = { id: l.id };
-                            if (l.position) v1Light.position = [l.position.x, l.position.y];
-                            if (l.properties) {
-                                v1Light.color = l.properties.color || "#ffffff";
-                                v1Light.range = l.properties.radius?.dim || 10;
-                                v1Light.intensity = l.properties.intensity || 1.0;
-                            }
-                            return v1Light;
-                        });
+                try {
+                    let originalBlob;
+                    if (sourceData.startsWith('data:image')) {
+                        const parts = sourceData.split(',');
+                        const mime = parts[0].match(/:(.*?);/)[1];
+                        originalBlob = safeBase64ToBlob(parts[1], mime);
+                    } else if (sourceData.startsWith('blob:') || sourceData.startsWith('http')) {
+                        const res = await fetch(sourceData);
+                        originalBlob = await res.blob();
+                    } else {
+                        originalBlob = safeBase64ToBlob(sourceData, 'image/png');
                     }
-                    if (levelManifest.entities.landing_zones) {
-                        levelManifest.entities.spawns = levelManifest.entities.landing_zones;
-                        delete levelManifest.entities.landing_zones;
-                    }
-                    if (levelManifest.entities.events) {
-                        levelManifest.entities.events = levelManifest.entities.events.map(ev => {
-                            if (ev.trigger_bounds && ev.trigger_bounds.center) {
-                                ev.x = ev.trigger_bounds.center.x;
-                                ev.y = ev.trigger_bounds.center.y;
-                                delete ev.trigger_bounds;
-                            }
-                            return ev;
-                        });
-                    }
-                }
-                compoundManifest.levels.push(levelManifest);
-            });
 
-            this.downloadJSON(`Compound_Dungeon_${isLegacy ? 'v1' : 'v2'}.uvtt`, compoundManifest);
-        },
-
-        async exportSecureVTT(isCompound = false) {
-            try {
-                if (!window.crypto || !window.crypto.subtle) {
-                    alert("SECURITY ERROR: The Web Crypto API requires a Secure Context. You must view this page via HTTPS or 'localhost'.");
-                    return;
-                }
-
-                if (!this.activeMap && !isCompound) return;
-                if (isCompound && catalog.length === 0) return;
-
-                const baseName = isCompound ? 'Compound_Dungeon' : (this.activeMap.filename || 'export');
-                const internalZip = new JSZip();
-
-                // --- 1. MEMORY-SAFE ASSET BUNDLER ---
-                const safeBase64ToBlob = (base64, mime) => {
-                    const binary = atob(base64);
-                    const array = new Uint8Array(binary.length);
-                    for (let i = 0; i < binary.length; i++) {
-                        array[i] = binary.charCodeAt(i);
-                    }
-                    return new Blob([array], { type: mime });
-                };
-
-                const bundleMapImage = async (mapDef, manifestToUpdate) => {
-                    const sourceData = mapDef.imageUrl || mapDef.manifest.image;
-                    if (!sourceData) return;
+                    let finalBlob = originalBlob;
+                    let ext = 'png';
 
                     try {
-                        let originalBlob;
-
-                        // Case A: Data URI
-                        if (sourceData.startsWith('data:image')) {
-                            const parts = sourceData.split(',');
-                            const mime = parts[0].match(/:(.*?);/)[1];
-                            originalBlob = safeBase64ToBlob(parts[1], mime);
-                        } 
-                        // Case B: blob: URL or http
-                        else if (sourceData.startsWith('blob:') || sourceData.startsWith('http')) {
-                            const res = await fetch(sourceData);
-                            originalBlob = await res.blob();
-                        } 
-                        // Case C: Raw Base64 string (Dungeondraft standard)
-                        else {
-                            originalBlob = safeBase64ToBlob(sourceData, 'image/png');
-                        }
-
-                        // --- WEBP TRANSCODING ---
-                        let finalBlob = originalBlob;
-                        let ext = 'png';
-
-                        try {
-                            const img = new Image();
-                            const blobUrl = URL.createObjectURL(originalBlob);
-                            
-                            await new Promise((resolve, reject) => {
-                                img.onload = resolve;
-                                img.onerror = reject;
-                                img.src = blobUrl;
-                            });
-
-                            const canvas = document.createElement('canvas');
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0);
-                            URL.revokeObjectURL(blobUrl);
-
-                            const webpBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/webp", 0.9));
-                            if (webpBlob) {
-                                finalBlob = webpBlob;
-                                ext = 'webp';
-                            }
-                        } catch (transcodeErr) {
-                            console.warn(`WebP transcode failed/skipped for map ${mapDef.id}. Falling back to source format.`, transcodeErr);
-                            // Fallback gracefully without breaking the loop
-                            if (originalBlob.type === 'image/jpeg') ext = 'jpg';
-                        }
-
-                        // Write to JSZip and strictly update manifest
-                        const filename = `map_${mapDef.id}.${ext}`;
-                        internalZip.file(`assets/images/${filename}`, finalBlob);
-                        manifestToUpdate.image = `assets/images/${filename}`;
-
-                    } catch (e) {
-                        console.error("Failed to bundle image for map", mapDef.id, e);
-                    }
-                };
-
-                // --- 2. BUILD THE JSON MANIFEST & INJECT IMAGES ---
-                if (isCompound) {
-                    const compoundManifest = {
-                        type: "compound_dungeon",
-                        export_version: 2,
-                        levels: []
-                    };
-                    for (const mapDef of catalog) {
-                        let levelManifest = verifyAndCleanManifest(mapDef.manifest);
-                        levelManifest.level_id = mapDef.id;
-                        levelManifest.level_name = mapDef.filename || "Unnamed Level";
+                        const img = new Image();
+                        const blobUrl = URL.createObjectURL(originalBlob);
                         
-                        await bundleMapImage(mapDef, levelManifest);
-                        compoundManifest.levels.push(levelManifest);
-                    }
-                    internalZip.file("manifest.json", JSON.stringify(compoundManifest, null, 2));
-                } else {
-                    const cleanManifest = verifyAndCleanManifest(this.activeMap.manifest);
-                    await bundleMapImage(this.activeMap, cleanManifest);
-                    internalZip.file("manifest.json", JSON.stringify(cleanManifest, null, 2));
-                }
-                
-                // --- 3. BUNDLE AUDIO FILES (If any exist) ---
-                if (Object.keys(audioBlobs).length > 0) {
-                    for (const [trackName, blob] of Object.entries(audioBlobs)) {
-                        internalZip.file(`assets/audio/${trackName}`, blob);
-                    }
-                }
+                        await new Promise((resolve, reject) => {
+                            img.onload = resolve;
+                            img.onerror = reject;
+                            img.src = blobUrl;
+                        });
 
-                // Generate payload buffer
-                const internalZipBuffer = await internalZip.generateAsync({ type: "arraybuffer" });
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        URL.revokeObjectURL(blobUrl);
 
-                // Generate AES-GCM Key
-                const key = await window.crypto.subtle.generateKey(
-                    { name: "AES-GCM", length: 256 },
-                    true,
-                    ["encrypt", "decrypt"]
-                );
-
-                const exportedKey = await window.crypto.subtle.exportKey("jwk", key);
-                const keyString = JSON.stringify(exportedKey, null, 2);
-
-                // Encrypt Payload
-                const iv = window.crypto.getRandomValues(new Uint8Array(12));
-                const ciphertext = await window.crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: iv },
-                    key,
-                    internalZipBuffer
-                );
-
-                const encryptedPayload = new Uint8Array(iv.length + ciphertext.byteLength);
-                encryptedPayload.set(iv, 0);
-                encryptedPayload.set(new Uint8Array(ciphertext), iv.length);
-
-                // Create Final Delivery Zip
-                const deliveryZip = new JSZip();
-                deliveryZip.file(`${baseName}.uvtt2k`, keyString); 
-                deliveryZip.file(`${baseName}.uvtt2z`, encryptedPayload);
-
-                const deliveryBuffer = await deliveryZip.generateAsync({ type: "blob" });
-                this.downloadBlob(`${baseName}_Secure_Export.zip`, deliveryBuffer);
-
-            } catch (error) {
-                console.error("Secure Export Failed:", error);
-                alert(`Export Failed: ${error.message || 'Check the console for details.'}`);
-            }
-        },
-
-        async loadProjectFromFile(file) {
-            if (!file) return;
-
-            // --- DECRYPTION & IMPORT PIPELINE ---
-            if (file.name.toLowerCase().endsWith('.zip')) {
-                try {
-                    if (!window.crypto || !window.crypto.subtle) {
-                        alert("SECURITY ERROR: Web Crypto API requires HTTPS or localhost to decrypt.");
-                        return;
-                    }
-
-                    const fileBuffer = await file.arrayBuffer();
-                    const zip = await JSZip.loadAsync(fileBuffer);
-                    
-                    const keyFile = Object.values(zip.files).find(f => f.name.endsWith('.uvtt2k'));
-                    const payloadFile = Object.values(zip.files).find(f => f.name.endsWith('.uvtt2z'));
-
-                    if (!keyFile || !payloadFile) {
-                        alert("Invalid Secure Archive: The .zip must contain both the .uvtt2k key and the .uvtt2z payload.");
-                        return;
-                    }
-
-                    const keyString = await keyFile.async("string");
-                    const jwk = JSON.parse(keyString);
-                    
-                    const cryptoKey = await window.crypto.subtle.importKey(
-                        "jwk",
-                        jwk,
-                        { name: "AES-GCM" },
-                        true,
-                        ["decrypt"]
-                    );
-
-                    const encryptedBuffer = await payloadFile.async("arraybuffer");
-                    const iv = encryptedBuffer.slice(0, 12);
-                    const ciphertext = encryptedBuffer.slice(12);
-
-                    const decryptedBuffer = await window.crypto.subtle.decrypt(
-                        { name: "AES-GCM", iv: new Uint8Array(iv) },
-                        cryptoKey,
-                        ciphertext
-                    );
-
-                    const internalZip = await JSZip.loadAsync(decryptedBuffer);
-                    const manifestFile = internalZip.file("manifest.json");
-                    
-                    if (!manifestFile) {
-                        alert("Decryption successful, but no manifest.json found inside the archive.");
-                        return;
-                    }
-
-                    const manifestString = await manifestFile.async("string");
-                    const manifestData = JSON.parse(manifestString);
-                    
-                    // --- ASSET RESTORER HELPER ---
-                    const restoreImage = async (manifestRef) => {
-                        if (!manifestRef.image) return "";
-                        const imgFile = internalZip.file(manifestRef.image);
-                        if (imgFile) {
-                            const blob = await imgFile.async("blob");
-                            return URL.createObjectURL(blob);
+                        const webpBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/webp", 0.9));
+                        if (webpBlob) {
+                            finalBlob = webpBlob;
+                            ext = 'webp';
                         }
-                        return "";
-                    };
-
-                    let newCatalog = [];
-                    if (manifestData.type === "compound_dungeon") {
-                        for (const level of manifestData.levels) {
-                            const restoredUrl = await restoreImage(level);
-                            newCatalog.push({
-                                id: level.level_id || crypto.randomUUID(),
-                                filename: level.level_name || "Imported Level",
-                                manifest: level,
-                                imageUrl: restoredUrl
-                            });
-                        }
-                    } else {
-                        const restoredUrl = await restoreImage(manifestData);
-                        newCatalog = [{
-                            id: crypto.randomUUID(),
-                            filename: file.name.replace('.zip', '').replace('_Secure_Export', ''),
-                            manifest: manifestData,
-                            imageUrl: restoredUrl 
-                        }];
+                    } catch (transcodeErr) {
+                        console.warn(`WebP transcode failed. Falling back to source format.`, transcodeErr);
+                        if (originalBlob.type === 'image/jpeg') ext = 'jpg';
                     }
 
-                    // --- RESTORE AUDIO BLOBS ---
-                    const newAudioBlobs = {};
-                    const audioPromises = [];
-                    internalZip.folder("assets/audio")?.forEach((relativePath, audioFile) => {
-                        if (!audioFile.dir) {
-                            audioPromises.push((async () => {
-                                newAudioBlobs[relativePath] = await audioFile.async("blob");
-                            })());
-                        }
-                    });
-                    await Promise.all(audioPromises);
-                    audioBlobs = newAudioBlobs;
-
-                    catalog = newCatalog;
-                    activeMapId = newCatalog[0].id;
-                    selectedItemIds = [];
-                    this.initHistory();
-                    updateTrigger++;
-                    this.triggerAutoSave();
-                    return;
+                    const filename = `map_${mapDef.id}.${ext}`;
+                    internalZip.file(`assets/images/${filename}`, finalBlob);
+                    manifestToUpdate.image = `assets/images/${filename}`;
 
                 } catch (e) {
-                    console.error("Secure import failed:", e);
-                    alert(`Decryption Failed: ${e.message || "The key is invalid or the archive is corrupted."}`);
+                    console.error("Failed to bundle image", e);
+                }
+            };
+
+            if (isCompound) {
+                const compoundManifest = { type: "compound_dungeon", export_version: 2, levels: [] };
+                for (const mapDef of this.catalog) {
+                    let levelManifest = verifyAndCleanManifest(mapDef.manifest);
+                    levelManifest.level_id = mapDef.id;
+                    levelManifest.level_name = mapDef.filename || "Unnamed Level";
+                    await bundleMapImage(mapDef, levelManifest);
+                    compoundManifest.levels.push(levelManifest);
+                }
+                internalZip.file("manifest.json", JSON.stringify(compoundManifest, null, 2));
+            } else {
+                const cleanManifest = verifyAndCleanManifest(this.activeMap.manifest);
+                await bundleMapImage(this.activeMap, cleanManifest);
+                internalZip.file("manifest.json", JSON.stringify(cleanManifest, null, 2));
+            }
+            
+            if (Object.keys(this.audioBlobs).length > 0) {
+                for (const [trackName, blob] of Object.entries(this.audioBlobs)) {
+                    internalZip.file(`assets/audio/${trackName}`, blob);
+                }
+            }
+
+            const internalZipBuffer = await internalZip.generateAsync({ type: "arraybuffer" });
+            const key = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+            const exportedKey = await window.crypto.subtle.exportKey("jwk", key);
+            const keyString = JSON.stringify(exportedKey, null, 2);
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const ciphertext = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, internalZipBuffer);
+
+            const encryptedPayload = new Uint8Array(iv.length + ciphertext.byteLength);
+            encryptedPayload.set(iv, 0);
+            encryptedPayload.set(new Uint8Array(ciphertext), iv.length);
+
+            const deliveryZip = new JSZip();
+            deliveryZip.file(`${baseName}.uvtt2k`, keyString); 
+            deliveryZip.file(`${baseName}.uvtt2z`, encryptedPayload);
+
+            const deliveryBuffer = await deliveryZip.generateAsync({ type: "blob" });
+            this.downloadBlob(`${baseName}_Secure_Export.zip`, deliveryBuffer);
+
+        } catch (error) {
+            console.error("Secure Export Failed:", error);
+            alert(`Export Failed: ${error.message}`);
+        }
+    }
+
+    async loadProjectFromFile(file) {
+        if (!file) return;
+
+        if (file.name.toLowerCase().endsWith('.zip')) {
+            try {
+                if (!window.crypto || !window.crypto.subtle) {
+                    alert("SECURITY ERROR: Web Crypto API requires HTTPS or localhost.");
                     return;
                 }
-            }
 
-            // --- STANDARD .UVTT-PROJ PIPELINE ---
-            try {
-                const text = await file.text();
-                const projectData = JSON.parse(text);
-                if (projectData.catalog) {
-                    catalog = projectData.catalog;
-                    activeMapId = projectData.activeMapId;
-                    selectedItemIds = [];
-                    this.initHistory();
-                    updateTrigger++;
-                    this.triggerAutoSave();
+                const fileBuffer = await file.arrayBuffer();
+                const zip = await JSZip.loadAsync(fileBuffer);
+                const keyFile = Object.values(zip.files).find(f => f.name.endsWith('.uvtt2k'));
+                const payloadFile = Object.values(zip.files).find(f => f.name.endsWith('.uvtt2z'));
+
+                if (!keyFile || !payloadFile) {
+                    alert("Invalid Secure Archive.");
+                    return;
                 }
+
+                const keyString = await keyFile.async("string");
+                const jwk = JSON.parse(keyString);
+                const cryptoKey = await window.crypto.subtle.importKey("jwk", jwk, { name: "AES-GCM" }, true, ["decrypt"]);
+
+                const encryptedBuffer = await payloadFile.async("arraybuffer");
+                const iv = encryptedBuffer.slice(0, 12);
+                const ciphertext = encryptedBuffer.slice(12);
+
+                const decryptedBuffer = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(iv) }, cryptoKey, ciphertext);
+                const internalZip = await JSZip.loadAsync(decryptedBuffer);
+                const manifestFile = internalZip.file("manifest.json");
+                
+                if (!manifestFile) { alert("No manifest found."); return; }
+
+                const manifestString = await manifestFile.async("string");
+                const manifestData = JSON.parse(manifestString);
+                
+                const restoreImage = async (manifestRef) => {
+                    if (!manifestRef.image) return "";
+                    const imgFile = internalZip.file(manifestRef.image);
+                    if (imgFile) {
+                        const blob = await imgFile.async("blob");
+                        return URL.createObjectURL(blob);
+                    }
+                    return "";
+                };
+
+                let newCatalog = [];
+                if (manifestData.type === "compound_dungeon") {
+                    for (const level of manifestData.levels) {
+                        const restoredUrl = await restoreImage(level);
+                        newCatalog.push({
+                            id: level.level_id || crypto.randomUUID(),
+                            filename: level.level_name || "Imported Level",
+                            manifest: level,
+                            imageUrl: restoredUrl
+                        });
+                    }
+                } else {
+                    const restoredUrl = await restoreImage(manifestData);
+                    newCatalog = [{
+                        id: crypto.randomUUID(),
+                        filename: file.name.replace('.zip', '').replace('_Secure_Export', ''),
+                        manifest: manifestData,
+                        imageUrl: restoredUrl 
+                    }];
+                }
+
+                const newAudioBlobs = {};
+                const audioPromises = [];
+                internalZip.folder("assets/audio")?.forEach((relativePath, audioFile) => {
+                    if (!audioFile.dir) {
+                        audioPromises.push((async () => {
+                            newAudioBlobs[relativePath] = await audioFile.async("blob");
+                        })());
+                    }
+                });
+                await Promise.all(audioPromises);
+                this.audioBlobs = newAudioBlobs;
+
+                this.catalog = newCatalog;
+                this.activeMapId = newCatalog[0].id;
+                this.selectedItemIds = [];
+                this.initHistory();
+                this.updateTrigger++;
+                this.triggerAutoSave();
+                return;
+
             } catch (e) {
-                console.error("Failed to parse project file.", e);
-                alert("Failed to parse project file. Ensure it is a valid .uvtt-proj or .zip file.");
+                console.error("Secure import failed:", e);
+                alert(`Decryption Failed.`);
+                return;
             }
-        },
+        }
 
-        setCatalog(newCatalog) {
-            catalog = newCatalog;
-            if (catalog.length > 0 && !activeMapId) {
-                activeMapId = catalog[0].id;
+        try {
+            const text = await file.text();
+            const projectData = JSON.parse(text);
+            if (projectData.catalog) {
+                this.catalog = projectData.catalog;
+                this.activeMapId = projectData.activeMapId;
+                this.selectedItemIds = [];
+                this.initHistory();
+                this.updateTrigger++;
+                this.triggerAutoSave();
             }
-            this.initHistory();
-            updateTrigger++;
+        } catch (e) {
+            console.error("Failed to parse.", e);
+        }
+    }
+
+    // --- LEVEL MANAGEMENT ---
+    setCatalog(newCatalog) {
+        this.catalog = newCatalog;
+        if (this.catalog.length > 0 && !this.activeMapId) {
+            this.activeMapId = this.catalog[0].id;
+        }
+        this.initHistory();
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    appendLevel(mapData) {
+        this.catalog = [...this.catalog, mapData];
+        this.switchMap(mapData.id);
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    switchMap(id) {
+        this.activeMapId = id;
+        this.selectedItemIds = [];
+        this.initHistory();
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    addMapLevel() {
+        const newId = crypto.randomUUID();
+        const newMap = {
+            id: newId,
+            filename: `Level ${this.catalog.length + 1}`,
+            manifest: {
+                resolution: { pixels_per_grid: 70, grid_line_width: 1.5, subgrid_line_width: 1.0 },
+                geometry: { walls: [], portals: [], overhead: [] },
+                entities: { lights: [], landing_zones: [], events: [], emitters: [], audio: { zones: [] } }
+            },
+            imageUrl: "",
+            history: [],
+            historyIndex: -1
+        };
+        this.catalog = [...this.catalog, newMap];
+        this.switchMap(newId);
+    }
+
+    deleteMapLevel(id) {
+        if (this.catalog.length <= 1) {
+            alert("You cannot delete the only level in the project.");
+            return;
+        }
+        this.catalog = this.catalog.filter(m => m.id !== id);
+        if (this.activeMapId === id) {
+            this.switchMap(this.catalog[0].id);
+        } else {
+            this.updateTrigger++;
             this.triggerAutoSave();
-        },
+        }
+    }
 
-        switchMap(id) {
-            activeMapId = id;
-            selectedItemIds = [];
-            this.initHistory();
-            updateTrigger++;
+    renameMapLevel(id, newName) {
+        const mapRef = this.catalog.find(m => m.id === id);
+        if (mapRef) {
+            mapRef.filename = newName;
+            this.updateTrigger++;
             this.triggerAutoSave();
-        },
+        }
+    }
 
-        toggleLightingPreview() {
-            lightingPreview = !lightingPreview;
-            updateTrigger++;
-        },
+    // --- TOOL & SELECTION ---
+    toggleLightingPreview() {
+        this.lightingPreview = !this.lightingPreview;
+        this.updateTrigger++;
+    }
 
-        setTool(tool) {
-            activeTool = tool;
-            selectedItemIds = [];
-            updateTrigger++;
-        },
+    setTool(tool) {
+        this.activeTool = tool;
+        this.selectedItemIds = [];
+        this.updateTrigger++;
+    }
 
-        clearSelection() {
-            selectedItemIds = [];
-            updateTrigger++;
-        },
+    clearSelection() {
+        this.selectedItemIds = [];
+        this.updateTrigger++;
+    }
 
-        selectItem(id, multi = false) {
-            if (multi) {
-                if (!selectedItemIds.includes(id)) {
-                    selectedItemIds = [...selectedItemIds, id];
-                }
-            } else {
-                selectedItemIds = [id];
+    selectItem(id, multi = false) {
+        if (multi) {
+            if (!this.selectedItemIds.includes(id)) {
+                this.selectedItemIds = [...this.selectedItemIds, id];
             }
-            updateTrigger++;
-        },
+        } else {
+            this.selectedItemIds = [id];
+        }
+        this.updateTrigger++;
+    }
 
-        // --- HISTORY ENGINE ---
-        initHistory() {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            if (!activeMap.history) {
-                activeMap.history = [{
-                    actionName: "Initial Load",
-                    timestamp: Date.now(),
-                    snapshot: JSON.parse(JSON.stringify(activeMap.manifest))
-                }];
-                activeMap.historyIndex = 0;
+    selectItems(ids, multi = false) {
+        if (multi) {
+            const newIds = ids.filter(id => !this.selectedItemIds.includes(id));
+            if (newIds.length > 0) {
+                this.selectedItemIds = [...this.selectedItemIds, ...newIds];
+                this.updateTrigger++;
             }
-        },
+        } else {
+            this.selectedItemIds = [...ids];
+            this.updateTrigger++;
+        }
+    }
 
-        pushHistory(actionName) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            this.initHistory();
+    // --- HISTORY ENGINE ---
+    initHistory() {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        if (!activeMap.history) {
+            activeMap.history = [{
+                actionName: "Initial Load",
+                timestamp: Date.now(),
+                snapshot: JSON.parse(JSON.stringify(activeMap.manifest))
+            }];
+            activeMap.historyIndex = 0;
+        }
+    }
 
-            const now = Date.now();
-            const lastAction = activeMap.history[activeMap.historyIndex];
+    pushHistory(actionName) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        this.initHistory();
 
-            const isRapidUpdate = lastAction && lastAction.actionName === actionName && (now - lastAction.timestamp < 1000);
+        const now = Date.now();
+        const lastAction = activeMap.history[activeMap.historyIndex];
 
-            if (!isRapidUpdate) {
-                activeMap.history = activeMap.history.slice(0, activeMap.historyIndex + 1);
-            }
+        const isRapidUpdate = lastAction && lastAction.actionName === actionName && (now - lastAction.timestamp < 1000);
 
-            const snapshot = JSON.parse(JSON.stringify(activeMap.manifest));
+        if (!isRapidUpdate) {
+            activeMap.history = activeMap.history.slice(0, activeMap.historyIndex + 1);
+        }
 
-            if (isRapidUpdate) {
-                activeMap.history[activeMap.historyIndex].snapshot = snapshot;
-                activeMap.history[activeMap.historyIndex].timestamp = now;
-            } else {
-                activeMap.history.push({ actionName, timestamp: now, snapshot });
-                activeMap.historyIndex++;
-                if (activeMap.history.length > 50) { 
-                    activeMap.history.shift();
-                    activeMap.historyIndex--;
-                }
-            }
-            updateTrigger++;
-            this.triggerAutoSave();
-        },
+        const snapshot = JSON.parse(JSON.stringify(activeMap.manifest));
 
-        undo() {
-            const activeMap = this.activeMap;
-            if (!activeMap || !activeMap.history || activeMap.historyIndex <= 0) return;
-            activeMap.historyIndex--;
-            const state = activeMap.history[activeMap.historyIndex];
-            activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
-            selectedItemIds = [];
-            updateTrigger++;
-            this.triggerAutoSave();
-        },
-
-        redo() {
-            const activeMap = this.activeMap;
-            if (!activeMap || !activeMap.history || activeMap.historyIndex >= activeMap.history.length - 1) return;
+        if (isRapidUpdate) {
+            activeMap.history[activeMap.historyIndex].snapshot = snapshot;
+            activeMap.history[activeMap.historyIndex].timestamp = now;
+        } else {
+            activeMap.history.push({ actionName, timestamp: now, snapshot });
             activeMap.historyIndex++;
-            const state = activeMap.history[activeMap.historyIndex];
-            activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
-            selectedItemIds = [];
-            updateTrigger++;
-            this.triggerAutoSave();
-        },
-
-        jumpToHistory(index) {
-            const activeMap = this.activeMap;
-            if (!activeMap || !activeMap.history || index < 0 || index >= activeMap.history.length) return;
-            activeMap.historyIndex = index;
-            const state = activeMap.history[index];
-            activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
-            selectedItemIds = [];
-            updateTrigger++;
-            this.triggerAutoSave();
-        },
-
-        // --- ENTITY CREATION (Nested Schema) ---
-        addGeometry(type, path, isBezier = false) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const id = crypto.randomUUID();
-            if (type === 'wall') {
-                if (!activeMap.manifest.geometry.walls) activeMap.manifest.geometry.walls = [];
-                activeMap.manifest.geometry.walls.push({ id, path, isBezier });
-            } else if (type === 'portal') {
-                if (!activeMap.manifest.geometry.portals) activeMap.manifest.geometry.portals = [];
-                activeMap.manifest.geometry.portals.push({ id, path, isBezier, properties: { type: 'door', state: 'closed' } });
-            } else if (type === 'roof') {
-                if (!activeMap.manifest.geometry.overhead) activeMap.manifest.geometry.overhead = [];
-                activeMap.manifest.geometry.overhead.push({ id, path });
+            if (activeMap.history.length > 50) { 
+                activeMap.history.shift();
+                activeMap.historyIndex--;
             }
-            selectedItemIds = [id];
-            this.pushHistory(`Added ${type}`);
-        },
+        }
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
 
-        addLight(x, y) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const light = {
-                id: crypto.randomUUID(), 
-                type: 'point', 
-                position: {x, y, z: 0},
-                properties: {
-                    color: '#ffffff', 
-                    intensity: 1.0,
-                    decay_model: 'inverse_square',
-                    radius: { bright: 5.0, dim: 10.0 },
-                    animation: { profile: 'none', speed: 0.0, intensity_variance: 0.0 },
-                    rotation: 0, 
-                    cone_angle: 60
+    undo() {
+        const activeMap = this.activeMap;
+        if (!activeMap || !activeMap.history || activeMap.historyIndex <= 0) return;
+        activeMap.historyIndex--;
+        const state = activeMap.history[activeMap.historyIndex];
+        activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
+        this.selectedItemIds = [];
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    redo() {
+        const activeMap = this.activeMap;
+        if (!activeMap || !activeMap.history || activeMap.historyIndex >= activeMap.history.length - 1) return;
+        activeMap.historyIndex++;
+        const state = activeMap.history[activeMap.historyIndex];
+        activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
+        this.selectedItemIds = [];
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    jumpToHistory(index) {
+        const activeMap = this.activeMap;
+        if (!activeMap || !activeMap.history || index < 0 || index >= activeMap.history.length) return;
+        activeMap.historyIndex = index;
+        const state = activeMap.history[index];
+        activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
+        this.selectedItemIds = [];
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
+    // --- NODE MUTATIONS (DELEGATED FOR DEEP SVELTE 5 REACTIVITY) ---
+    deleteVectorNode(exactX, exactY, thresholdSq) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return false;
+        let nodeDeleted = false;
+
+        ['walls', 'portals', 'overhead'].forEach(cat => {
+            const items = activeMap.manifest.geometry[cat];
+            if (!items) return;
+            for (let itemIdx = items.length - 1; itemIdx >= 0; itemIdx--) {
+                const item = items[itemIdx];
+                if (nodeDeleted || !item.path) continue;
+                for (let i = 0; i < item.path.length; i++) {
+                    const px = Number(item.path[i].x);
+                    const py = Number(item.path[i].y);
+                    const distSq = (exactX - px) ** 2 + (exactY - py) ** 2;
+
+                    if (distSq < thresholdSq) {
+                        item.path.splice(i, 1);
+                        item.path = [...item.path]; // Force Svelte Proxy Reassignment
+                        
+                        if (item.path.length < 2) {
+                            items.splice(itemIdx, 1);
+                            this.selectedItemIds = this.selectedItemIds.filter(id => id !== item.id);
+                        }
+                        
+                        nodeDeleted = true;
+                        activeMap.manifest.geometry[cat] = [...items]; // Force Svelte Proxy Reassignment
+                        this.pushHistory("Delete Vector Node");
+                        this.updateTrigger++;
+                        return;
+                    }
                 }
-            };
-            if (!activeMap.manifest.entities.lights) activeMap.manifest.entities.lights = [];
-            activeMap.manifest.entities.lights.push(light);
-            selectedItemIds = [light.id];
-            this.pushHistory("Added Light");
-        },
+            }
+        });
+        return nodeDeleted;
+    }
 
-        addSpawn(x, y) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const spawn = { id: crypto.randomUUID(), coordinates: [x, y], name: 'New Spawn', shape: 'circle', is_default: false };
-            if (!activeMap.manifest.entities.landing_zones) activeMap.manifest.entities.landing_zones = [];
-            activeMap.manifest.entities.landing_zones.push(spawn);
-            selectedItemIds = [spawn.id];
-            this.pushHistory("Added Spawn");
-        },
+    splitVectorNode(exactX, exactY, thresholdSq) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return false;
+        let splitOccurred = false;
 
-        addEvent(x, y) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const event = {
-                id: crypto.randomUUID(), name: 'New Event', eventType: 'Trap/Door Trigger', targetSpawnId: null,
-                trigger_bounds: { center: {x, y}, radius: 0.5 }
-            };
-            if (!activeMap.manifest.entities.events) activeMap.manifest.entities.events = [];
-            activeMap.manifest.entities.events.push(event);
-            selectedItemIds = [event.id];
-            this.pushHistory("Added Event");
-        },
+        ['walls', 'portals', 'overhead'].forEach(cat => {
+            const items = activeMap.manifest.geometry[cat];
+            if (!items) return;
+            for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
+                const item = items[itemIdx];
+                if (splitOccurred || !item.path) continue;
+                for (let i = 0; i < item.path.length - 1; i++) {
+                    const x1 = Number(item.path[i].x);
+                    const y1 = Number(item.path[i].y);
+                    const x2 = Number(item.path[i + 1].x);
+                    const y2 = Number(item.path[i + 1].y);
+                    const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+                    if (l2 === 0) continue;
 
-        addAudio(x, y) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const audio = { 
-                id: crypto.randomUUID(), center: {x, y}, radius: 5, inner_radius: 2.5,
-                volume: 100, muffledByWalls: true, track: "" 
-            };
-            if (!activeMap.manifest.entities.audio) activeMap.manifest.entities.audio = { zones: [] };
-            if (!activeMap.manifest.entities.audio.zones) activeMap.manifest.entities.audio.zones = [];
-            activeMap.manifest.entities.audio.zones.push(audio);
-            selectedItemIds = [audio.id];
-            this.pushHistory("Added Audio Zone");
-        },
+                    let t = Math.max(0, Math.min(1, ((exactX - x1) * (x2 - x1) + (exactY - y1) * (y2 - y1)) / l2));
+                    const projX = x1 + t * (x2 - x1);
+                    const projY = y1 + t * (y2 - y1);
+                    const distSq = (exactX - projX) ** 2 + (exactY - projY) ** 2;
 
-        addEmitter(x, y) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const emitter = { 
-                id: crypto.randomUUID(), 
-                position: {x, y, z: 0}, 
-                type: 'weather', style: 'rain',
-                isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100,
-                direction: 180, speed: 50, intensity: 50, variance: 10, graphic: ''
-            };
-            if (!activeMap.manifest.entities.emitters) activeMap.manifest.entities.emitters = [];
-            activeMap.manifest.entities.emitters.push(emitter);
-            selectedItemIds = [emitter.id];
-            this.pushHistory("Added Emitter");
-        },
+                    if (distSq < thresholdSq) {
+                        item.path.splice(i + 1, 0, { x: exactX, y: exactY });
+                        item.path = [...item.path]; // Force Svelte Proxy Reassignment
+                        splitOccurred = true;
+                        activeMap.manifest.geometry[cat] = [...items]; // Force Svelte Proxy Reassignment
+                        this.pushHistory("Split Vector");
+                        this.updateTrigger++;
+                        return;
+                    }
+                }
+            }
+        });
+        return splitOccurred;
+    }
 
-        // --- MUTATIONS ---
-        updateItemProperty(id, keyPath, value) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const m = activeMap.manifest;
-            
-            if (keyPath === "is_default" && value === true) {
-                m.entities.landing_zones?.forEach(lz => {
-                    if (lz.id !== id) lz.is_default = false;
+    // --- ENTITY CREATION & DEFAULTS ---
+    updateDefaultSetting(category, keyPath, value) {
+        let obj = this.defaultSettings[category];
+        const keys = keyPath.split('.');
+        for (let i = 0; i < keys.length - 1; i++) {
+            if (obj[keys[i]] === undefined) obj[keys[i]] = {};
+            obj = obj[keys[i]];
+        }
+        obj[keys[keys.length - 1]] = value;
+        this.defaultSettings = { ...this.defaultSettings };
+        this.updateTrigger++; 
+    }
+
+    addGeometry(type, path, isBezier = false) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const id = crypto.randomUUID();
+        if (type === 'wall') {
+            if (!activeMap.manifest.geometry.walls) activeMap.manifest.geometry.walls = [];
+            activeMap.manifest.geometry.walls.push({ id, path, isBezier, properties: JSON.parse(JSON.stringify(this.defaultSettings.wall.properties)) });
+        } else if (type === 'portal') {
+            if (!activeMap.manifest.geometry.portals) activeMap.manifest.geometry.portals = [];
+            activeMap.manifest.geometry.portals.push({ id, path, isBezier, properties: JSON.parse(JSON.stringify(this.defaultSettings.portal.properties)) });
+        } else if (type === 'roof') {
+            if (!activeMap.manifest.geometry.overhead) activeMap.manifest.geometry.overhead = [];
+            activeMap.manifest.geometry.overhead.push({ id, path, properties: JSON.parse(JSON.stringify(this.defaultSettings.roof.properties)) });
+        }
+        this.pushHistory(`Added ${type}`);
+    }
+
+    addLight(x, y) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.light;
+        const light = {
+            id: crypto.randomUUID(), 
+            type: ds.type, 
+            position: {x, y, z: ds.position.z},
+            properties: JSON.parse(JSON.stringify(ds.properties))
+        };
+        if (!activeMap.manifest.entities.lights) activeMap.manifest.entities.lights = [];
+        activeMap.manifest.entities.lights.push(light);
+        this.pushHistory("Added Light");
+    }
+
+    addSpawn(x, y) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.spawn;
+        const spawn = { id: crypto.randomUUID(), coordinates: [x, y], name: ds.name, shape: ds.shape, is_default: ds.is_default };
+        
+        if (ds.is_default) {
+            if (activeMap.manifest.entities.landing_zones) {
+                activeMap.manifest.entities.landing_zones.forEach(lz => lz.is_default = false);
+            }
+            this.updateDefaultSetting('spawn', 'is_default', false);
+        }
+
+        if (!activeMap.manifest.entities.landing_zones) activeMap.manifest.entities.landing_zones = [];
+        activeMap.manifest.entities.landing_zones.push(spawn);
+        this.pushHistory("Added Spawn");
+    }
+
+    addEvent(x, y) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.event;
+        const eventId = crypto.randomUUID();
+
+        let newEvent = {
+            id: eventId, 
+            name: ds.name, 
+            eventType: ds.eventType, 
+            activation: ds.activation,
+            targetSpawnId: ds.targetSpawnId,
+            trigger_bounds: { center: {x, y}, radius: ds.trigger_bounds.radius }
+        };
+
+        const isTeleportOrStairs = ds.eventType === 'Teleport' || ds.eventType === 'Stairs/Ladder';
+
+        if (isTeleportOrStairs && ds.autoCreateMatch) {
+            const targetMapId = ds.targetFloorId || activeMap.id;
+            const targetMap = this.catalog.find(m => m.id === targetMapId);
+
+            if (targetMap) {
+                const targetEventId = crypto.randomUUID();
+                const localSpawnId = crypto.randomUUID();
+                const targetSpawnId = crypto.randomUUID();
+                
+                const offset = 1; 
+
+                newEvent.targetSpawnId = targetSpawnId;
+
+                if (!activeMap.manifest.entities.landing_zones) activeMap.manifest.entities.landing_zones = [];
+                activeMap.manifest.entities.landing_zones.push({
+                    id: localSpawnId, 
+                    coordinates: [x + offset, y], 
+                    name: `Return from ${targetMap.filename || 'Target'}`, 
+                    shape: 'circle', 
+                    is_default: false
+                });
+
+                if (!targetMap.manifest.entities.events) targetMap.manifest.entities.events = [];
+                if (!targetMap.manifest.entities.landing_zones) targetMap.manifest.entities.landing_zones = [];
+
+                targetMap.manifest.entities.events.push({
+                    id: targetEventId, 
+                    name: `Return to ${activeMap.filename || 'Origin'}`, 
+                    eventType: ds.eventType, 
+                    activation: ds.activation,
+                    targetSpawnId: localSpawnId, 
+                    trigger_bounds: { center: {x, y}, radius: ds.trigger_bounds.radius }
+                });
+
+                targetMap.manifest.entities.landing_zones.push({
+                    id: targetSpawnId, 
+                    coordinates: [x + offset, y], 
+                    name: `Arrival from ${activeMap.filename || 'Origin'}`, 
+                    shape: 'circle', 
+                    is_default: false
                 });
             }
+        }
 
-            if (id === activeMapId) {
-                 let obj = m;
-                 const keys = keyPath.split('.');
-                 for (let i = 0; i < keys.length - 1; i++) {
-                     if (!obj[keys[i]]) obj[keys[i]] = {};
-                     obj = obj[keys[i]];
-                 }
-                 obj[keys[keys.length - 1]] = value;
-                 this.pushHistory("Modified Map Settings");
-                 return;
+        if (!activeMap.manifest.entities.events) activeMap.manifest.entities.events = [];
+        activeMap.manifest.entities.events.push(newEvent);
+
+        this.pushHistory(ds.autoCreateMatch ? "Generated Reciprocal Links" : "Added Event");
+
+        if (ds.autoCreateMatch) {
+            this.updateDefaultSetting('event', 'autoCreateMatch', false);
+            this.updateDefaultSetting('event', 'targetFloorId', "");
+        }
+    }
+
+    addAudio(x, y) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.audio;
+        const audio = { 
+            id: crypto.randomUUID(), center: {x, y}, radius: ds.radius, inner_radius: ds.inner_radius,
+            volume: ds.volume, muffledByWalls: ds.muffledByWalls, track: ds.track 
+        };
+        if (!activeMap.manifest.entities.audio) activeMap.manifest.entities.audio = { zones: [] };
+        if (!activeMap.manifest.entities.audio.zones) activeMap.manifest.entities.audio.zones = [];
+        activeMap.manifest.entities.audio.zones.push(audio);
+        this.pushHistory("Added Audio Zone");
+    }
+
+    addEmitter(x, y) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.emitter;
+        const emitter = { 
+            id: crypto.randomUUID(), 
+            position: {x, y, z: ds.position.z}, 
+            type: ds.type, style: ds.style,
+            isGlobal: ds.isGlobal, layering: ds.layering, tint: ds.tint, scale: ds.scale,
+            direction: ds.direction, speed: ds.speed, intensity: ds.intensity, variance: ds.variance, graphic: ds.graphic
+        };
+        if (!activeMap.manifest.entities.emitters) activeMap.manifest.entities.emitters = [];
+        activeMap.manifest.entities.emitters.push(emitter);
+        this.pushHistory("Added Emitter");
+    }
+
+    // --- MUTATIONS ---
+    updateItemProperty(id, keyPath, value) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const m = activeMap.manifest;
+        
+        if (keyPath === "is_default" && value === true) {
+            m.entities.landing_zones?.forEach(lz => {
+                if (lz.id !== id) lz.is_default = false;
+            });
+        }
+
+        if (id === this.activeMapId) {
+             let obj = m;
+             const keys = keyPath.split('.');
+             for (let i = 0; i < keys.length - 1; i++) {
+                 if (!obj[keys[i]]) obj[keys[i]] = {};
+                 obj = obj[keys[i]];
+             }
+             obj[keys[keys.length - 1]] = value;
+             this.pushHistory("Modified Map Settings");
+             this.updateTrigger++;
+             return;
+        }
+
+        let foundItem = null;
+        for (const cat of ['walls', 'portals', 'overhead']) {
+            if (m.geometry[cat]) {
+                foundItem = m.geometry[cat].find(i => i.id === id);
+                if (foundItem) break;
             }
-
-            let foundItem = null;
-            for (const cat of ['walls', 'portals', 'overhead']) {
-                if (m.geometry[cat]) {
-                    foundItem = m.geometry[cat].find(i => i.id === id);
+        }
+        if (!foundItem) {
+            for (const cat of ['lights', 'landing_zones', 'events', 'emitters']) {
+                if (m.entities[cat]) {
+                    foundItem = m.entities[cat].find(i => i.id === id);
                     if (foundItem) break;
                 }
             }
-            if (!foundItem) {
-                for (const cat of ['lights', 'landing_zones', 'events', 'emitters']) {
-                    if (m.entities[cat]) {
-                        foundItem = m.entities[cat].find(i => i.id === id);
-                        if (foundItem) break;
-                    }
-                }
-            }
-            if (!foundItem && m.entities.audio?.zones) {
-                foundItem = m.entities.audio.zones.find(i => i.id === id);
-            }
+        }
+        if (!foundItem && m.entities.audio?.zones) {
+            foundItem = m.entities.audio.zones.find(i => i.id === id);
+        }
 
-            if (foundItem) {
-                const keys = keyPath.split('.');
-                let obj = foundItem;
-                for (let i = 0; i < keys.length - 1; i++) {
-                    if (!obj[keys[i]]) obj[keys[i]] = {};
-                    obj = obj[keys[i]];
-                }
-                obj[keys[keys.length - 1]] = value;
-                this.pushHistory("Modified Property");
+        if (foundItem) {
+            const keys = keyPath.split('.');
+            let obj = foundItem;
+            for (let i = 0; i < keys.length - 1; i++) {
+                if (!obj[keys[i]]) obj[keys[i]] = {};
+                obj = obj[keys[i]];
             }
-        },
+            obj[keys[keys.length - 1]] = value;
+            this.pushHistory("Modified Property");
+            this.updateTrigger++; 
+        }
+    }
 
-        updateNodePosition(id, exactX, exactY, dx, dy) {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const m = activeMap.manifest;
-            
+    updateNodePosition(id, exactX, exactY, dx, dy) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const m = activeMap.manifest;
+        
+        ['walls', 'portals', 'overhead'].forEach(cat => {
+            const item = m.geometry[cat]?.find(i => i.id === id);
+            if (item && item.path) item.path.forEach(pt => { pt.x = Number(pt.x) + dx; pt.y = Number(pt.y) + dy; });
+        });
+
+        const light = m.entities.lights?.find(i => i.id === id);
+        if (light && light.position) { light.position.x = exactX; light.position.y = exactY; }
+        
+        const spawn = m.entities.landing_zones?.find(i => i.id === id);
+        if (spawn && spawn.coordinates) { spawn.coordinates[0] = exactX; spawn.coordinates[1] = exactY; }
+        
+        const evt = m.entities.events?.find(i => i.id === id);
+        if (evt && evt.trigger_bounds?.center) { evt.trigger_bounds.center.x = exactX; evt.trigger_bounds.center.y = exactY; }
+        
+        const aud = m.entities.audio?.zones?.find(i => i.id === id);
+        if (aud && aud.center) { aud.center.x = exactX; aud.center.y = exactY; }
+        
+        const em = m.entities.emitters?.find(i => i.id === id);
+        if (em && em.position) { em.position.x = exactX; em.position.y = exactY; }
+
+        this.pushHistory("Moved Item");
+    }
+
+    translateSelection(dx, dy) {
+        const activeMap = this.activeMap;
+        if (!activeMap || this.selectedItemIds.length === 0) return;
+        const m = activeMap.manifest;
+        this.selectedItemIds.forEach(id => {
             ['walls', 'portals', 'overhead'].forEach(cat => {
                 const item = m.geometry[cat]?.find(i => i.id === id);
-                if (item && item.path) item.path.forEach(pt => { pt.x = Number(pt.x) + dx; pt.y = Number(pt.y) + dy; });
+                if (item && item.path) {
+                    item.path.forEach(pt => { pt.x += dx; pt.y += dy; });
+                }
             });
-
-            const light = m.entities.lights?.find(i => i.id === id);
-            if (light && light.position) { light.position.x += dx; light.position.y += dy; }
-            
-            const spawn = m.entities.landing_zones?.find(i => i.id === id);
-            if (spawn && spawn.coordinates) { spawn.coordinates[0] += dx; spawn.coordinates[1] += dy; }
-            
-            const evt = m.entities.events?.find(i => i.id === id);
-            if (evt && evt.trigger_bounds?.center) { evt.trigger_bounds.center.x += dx; evt.trigger_bounds.center.y += dy; }
-            
+            ['lights', 'landing_zones', 'events', 'emitters'].forEach(cat => {
+                const item = m.entities[cat]?.find(i => i.id === id);
+                if (item) {
+                    if (item.position) { item.position.x += dx; item.position.y += dy; }
+                    if (item.coordinates) { item.coordinates[0] += dx; item.coordinates[1] += dy; }
+                    if (item.trigger_bounds?.center) { item.trigger_bounds.center.x += dx; item.trigger_bounds.center.y += dy; }
+                }
+            });
             const aud = m.entities.audio?.zones?.find(i => i.id === id);
             if (aud && aud.center) { aud.center.x += dx; aud.center.y += dy; }
-            
-            const em = m.entities.emitters?.find(i => i.id === id);
-            if (em && em.position) { em.position.x += dx; em.position.y += dy; }
+        });
+        this.pushHistory("Translated Selection");
+    }
 
-            this.pushHistory("Moved Item");
-        },
+    deleteSelected() {
+        const activeMap = this.activeMap;
+        if (!activeMap || this.selectedItemIds.length === 0) return;
+        const m = activeMap.manifest;
 
-        translateSelection(dx, dy) {
-            const activeMap = this.activeMap;
-            if (!activeMap || selectedItemIds.length === 0) return;
-            const m = activeMap.manifest;
-            selectedItemIds.forEach(id => {
-                ['walls', 'portals'].forEach(cat => {
-                    const item = m.geometry[cat]?.find(i => i.id === id);
-                    if (item && item.path) {
-                        item.path.forEach(pt => { pt.x += dx; pt.y += dy; });
-                    }
-                });
-                ['lights', 'landing_zones', 'events', 'emitters'].forEach(cat => {
-                    const item = m.entities[cat]?.find(i => i.id === id);
-                    if (item) {
-                        if (item.position) { item.position.x += dx; item.position.y += dy; }
-                        if (item.coordinates) { item.coordinates[0] += dx; item.coordinates[1] += dy; }
-                        if (item.trigger_bounds?.center) { item.trigger_bounds.center.x += dx; item.trigger_bounds.center.y += dy; }
-                    }
-                });
-                const aud = m.entities.audio?.zones?.find(i => i.id === id);
-                if (aud && aud.center) { aud.center.x += dx; aud.center.y += dy; }
-            });
-            this.pushHistory("Translated Selection");
-        },
-
-        deleteSelected() {
-            const activeMap = this.activeMap;
-            if (!activeMap || selectedItemIds.length === 0) return;
-            const m = activeMap.manifest;
-
-            const removeById = (arr) => {
-                if (!Array.isArray(arr)) return;
-                for (let i = arr.length - 1; i >= 0; i--) {
-                    if (selectedItemIds.includes(arr[i].id)) {
-                        arr.splice(i, 1);
-                    }
-                }
-            };
-
-            if (m.geometry) {
-                removeById(m.geometry.walls);
-                removeById(m.geometry.portals);
-                removeById(m.geometry.overhead);
-            }
-            if (m.entities) {
-                removeById(m.entities.lights);
-                removeById(m.entities.landing_zones);
-                removeById(m.entities.events);
-                removeById(m.entities.emitters);
-                if (m.entities.audio) {
-                    removeById(m.entities.audio.zones);
+        const removeById = (arr) => {
+            if (!Array.isArray(arr)) return;
+            for (let i = arr.length - 1; i >= 0; i--) {
+                if (this.selectedItemIds.includes(arr[i].id)) {
+                    arr.splice(i, 1);
                 }
             }
+        };
 
-            selectedItemIds = [];
-            this.pushHistory("Deleted Selection");
-            updateTrigger++;
-        },
-
-        convertCategory(id, targetCategory, portalType = 'door') {
-            const activeMap = this.activeMap;
-            if (!activeMap) return;
-            const m = activeMap.manifest;
-            let foundItem = null;
-            ['walls', 'portals'].forEach(cat => {
-                const itemIndex = m.geometry[cat]?.findIndex(i => i.id === id);
-                if (itemIndex > -1) foundItem = m.geometry[cat].splice(itemIndex, 1)[0];
-            });
-            if (foundItem) {
-                if (targetCategory === 'portals') {
-                    if (!foundItem.properties) foundItem.properties = {};
-                    foundItem.properties.type = portalType;
-                    foundItem.properties.state = 'closed';
-                } else {
-                    if (foundItem.properties) { delete foundItem.properties.type; delete foundItem.properties.state; }
-                }
-                if (!m.geometry[targetCategory]) m.geometry[targetCategory] = [];
-                m.geometry[targetCategory].push(foundItem);
-                this.pushHistory("Converted Entity");
-            }
-        },
-
-        smoothSelectedWalls() {
-            const activeMap = this.activeMap;
-            if (!activeMap || selectedItemIds.length === 0) return;
-            const m = activeMap.manifest;
-            selectedItemIds.forEach(id => {
-                const wall = m.geometry.walls?.find(i => i.id === id);
-                if (wall && wall.path.length > 2) {
-                    wall.path = pointsToBezier(wall.path);
-                    wall.isBezier = true; 
-                }
-            });
-            this.pushHistory("Smoothed Spline");
-        },
-
-        copySelected() {
-            const activeMap = this.activeMap;
-            if (!activeMap || selectedItemIds.length === 0) return;
-            const m = activeMap.manifest;
-            clipboard = [];
-            selectedItemIds.forEach(id => {
-                ['walls', 'portals', 'overhead'].forEach(cat => {
-                    const item = m.geometry[cat]?.find(i => i.id === id);
-                    if (item) clipboard.push({ category: cat, data: JSON.parse(JSON.stringify(item)), group: 'geometry' });
-                });
-                ['lights', 'landing_zones', 'events', 'emitters'].forEach(cat => {
-                    const item = m.entities[cat]?.find(i => i.id === id);
-                    if (item) clipboard.push({ category: cat, data: JSON.parse(JSON.stringify(item)), group: 'entities' });
-                });
-                const aud = m.entities.audio?.zones?.find(i => i.id === id);
-                if (aud) clipboard.push({ category: 'zones', data: JSON.parse(JSON.stringify(aud)), group: 'audio' });
-            });
-        },
-
-        pasteClipboard(x, y) {
-            const activeMap = this.activeMap;
-            if (!activeMap || clipboard.length === 0) return;
-            const m = activeMap.manifest;
-            const newSelection = [];
-            const offset = 0.5;
-
-            clipboard.forEach(clip => {
-                const clone = JSON.parse(JSON.stringify(clip.data));
-                clone.id = crypto.randomUUID();
-                if (clip.group === 'geometry') {
-                    clone.path.forEach(pt => { pt.x = Number(pt.x) + offset; pt.y = Number(pt.y) + offset; });
-                    if(!m.geometry[clip.category]) m.geometry[clip.category] = [];
-                    m.geometry[clip.category].push(clone);
-                } else if (clip.group === 'entities') {
-                    if (clone.position) { clone.position.x += offset; clone.position.y += offset; }
-                    if (clone.coordinates) { clone.coordinates[0] += offset; clone.coordinates[1] += offset; clone.is_default = false; }
-                    if (clone.trigger_bounds?.center) { clone.trigger_bounds.center.x += offset; clone.trigger_bounds.center.y += offset; }
-                    if(!m.entities[clip.category]) m.entities[clip.category] = [];
-                    m.entities[clip.category].push(clone);
-                } else if (clip.group === 'audio') {
-                    if (clone.center) { clone.center.x += offset; clone.center.y += offset; }
-                    if(!m.entities.audio) m.entities.audio = { zones: [] };
-                    if(!m.entities.audio.zones) m.entities.audio.zones = [];
-                    m.entities.audio.zones.push(clone);
-                }
-                newSelection.push(clone.id);
-            });
-            selectedItemIds = newSelection;
-            this.pushHistory("Pasted Items");
-        },
-
-        duplicateSelected() {
-            this.copySelected();
-            this.pasteClipboard(0, 0);
+        if (m.geometry) {
+            removeById(m.geometry.walls);
+            removeById(m.geometry.portals);
+            removeById(m.geometry.overhead);
         }
-    };
+        if (m.entities) {
+            removeById(m.entities.lights);
+            removeById(m.entities.landing_zones);
+            removeById(m.entities.events);
+            removeById(m.entities.emitters);
+            if (m.entities.audio) {
+                removeById(m.entities.audio.zones);
+            }
+        }
+
+        this.selectedItemIds = [];
+        this.pushHistory("Deleted Selection");
+        this.updateTrigger++;
+    }
+
+    convertCategory(id, targetCategory, portalType = 'door') {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const m = activeMap.manifest;
+        let foundItem = null;
+        ['walls', 'portals'].forEach(cat => {
+            const itemIndex = m.geometry[cat]?.findIndex(i => i.id === id);
+            if (itemIndex > -1) foundItem = m.geometry[cat].splice(itemIndex, 1)[0];
+        });
+        if (foundItem) {
+            if (targetCategory === 'portals') {
+                if (!foundItem.properties) foundItem.properties = {};
+                foundItem.properties.type = portalType;
+                foundItem.properties.state = 'closed';
+            } else {
+                if (foundItem.properties) { delete foundItem.properties.type; delete foundItem.properties.state; }
+            }
+            if (!m.geometry[targetCategory]) m.geometry[targetCategory] = [];
+            m.geometry[targetCategory].push(foundItem);
+            this.pushHistory("Converted Entity");
+        }
+    }
+
+    smoothSelectedWalls() {
+        const activeMap = this.activeMap;
+        if (!activeMap || this.selectedItemIds.length === 0) return;
+        const m = activeMap.manifest;
+        this.selectedItemIds.forEach(id => {
+            const wall = m.geometry.walls?.find(i => i.id === id);
+            if (wall && wall.path.length > 2) {
+                wall.path = pointsToBeBezier(wall.path);
+                wall.isBezier = true; 
+            }
+        });
+        this.pushHistory("Smoothed Spline");
+    }
+
+    copySelected() {
+        const activeMap = this.activeMap;
+        if (!activeMap || this.selectedItemIds.length === 0) return;
+        const m = activeMap.manifest;
+        this.clipboard = [];
+        this.selectedItemIds.forEach(id => {
+            ['walls', 'portals', 'overhead'].forEach(cat => {
+                const item = m.geometry[cat]?.find(i => i.id === id);
+                if (item) this.clipboard.push({ category: cat, data: JSON.parse(JSON.stringify(item)), group: 'geometry' });
+            });
+            ['lights', 'landing_zones', 'events', 'emitters'].forEach(cat => {
+                const item = m.entities[cat]?.find(i => i.id === id);
+                if (item) this.clipboard.push({ category: cat, data: JSON.parse(JSON.stringify(item)), group: 'entities' });
+            });
+            const aud = m.entities.audio?.zones?.find(i => i.id === id);
+            if (aud) this.clipboard.push({ category: 'zones', data: JSON.parse(JSON.stringify(aud)), group: 'audio' });
+        });
+    }
+
+    pasteClipboard(x, y) {
+        const activeMap = this.activeMap;
+        if (!activeMap || this.clipboard.length === 0) return;
+        const m = activeMap.manifest;
+        const newSelection = [];
+        const offset = 0.5;
+
+        this.clipboard.forEach(clip => {
+            const clone = JSON.parse(JSON.stringify(clip.data));
+            clone.id = crypto.randomUUID();
+            if (clip.group === 'geometry') {
+                clone.path.forEach(pt => { pt.x = Number(pt.x) + offset; pt.y = Number(pt.y) + offset; });
+                if(!m.geometry[clip.category]) m.geometry[clip.category] = [];
+                m.geometry[clip.category].push(clone);
+            } else if (clip.group === 'entities') {
+                if (clone.position) { clone.position.x += offset; clone.position.y += offset; }
+                if (clone.coordinates) { clone.coordinates[0] += offset; clone.coordinates[1] += offset; clone.is_default = false; }
+                if (clone.trigger_bounds?.center) { clone.trigger_bounds.center.x += offset; clone.trigger_bounds.center.y += offset; }
+                if(!m.entities[clip.category]) m.entities[clip.category] = [];
+                m.entities[clip.category].push(clone);
+            } else if (clip.group === 'audio') {
+                if (clone.center) { clone.center.x += offset; clone.center.y += offset; }
+                if(!m.entities.audio) m.entities.audio = { zones: [] };
+                if(!m.entities.audio.zones) m.entities.audio.zones = [];
+                m.entities.audio.zones.push(clone);
+            }
+            newSelection.push(clone.id);
+        });
+        this.selectedItemIds = newSelection;
+        this.pushHistory("Pasted Items");
+    }
+
+    duplicateSelected() {
+        this.copySelected();
+        this.pasteClipboard(0, 0);
+    }
 }
+
+export const mapStore = new MapStore();

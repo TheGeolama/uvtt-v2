@@ -4,7 +4,8 @@
   import CanvasWorkspace from "$components/CanvasWorkspace.svelte";
   import Toolbar from "$components/Toolbar.svelte";
   import HistoryPanel from "$components/HistoryPanel.svelte";
-  import AudioManager from "$components/AudioManager.svelte";
+  import ToastManager from "$components/ToastManager.svelte";
+  import LoadingOverlay from "$components/LoadingOverlay.svelte";
   import { mapStore } from "$stores/mapStore.svelte.js";
   import { browser } from "$app/environment";
 
@@ -36,8 +37,12 @@
       <CanvasWorkspace />
       <Toolbar />
       <HistoryPanel />
-      <AudioManager />
     </div>
+  {/if}
+
+  {#if isClient}
+    <LoadingOverlay />
+    <ToastManager />
   {/if}
 </main>
 

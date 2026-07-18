@@ -23,14 +23,19 @@
 
   let draggedItemId = null;
   let lastDragGrid = null;
-
   let currentGridX = 0;
   let currentGridY = 0;
+
+  let isSpacePressed = $state(false);
+
+  let isBoxSelecting = false;
+  let boxSelectStart = null;
+  let boxSelectEnd = null;
+  let boxSelectGfx = null;
 
   let activeMap = $derived(mapStore.activeMap);
   let activeTool = $derived(mapStore.activeTool);
   let lightingPreview = $derived(mapStore.lightingPreview);
-
   let isPixiReady = $state(false);
 
   let draftingPath = $state([]);
@@ -71,7 +76,6 @@
 
     geometryContainer = new PIXI.Container();
     viewportContainer.addChild(geometryContainer);
-
     isPixiReady = true;
   });
 
@@ -153,7 +157,6 @@
       !shadowContainer
     )
       return;
-
     gridContainer.removeChildren().forEach((c) => c.destroy());
     geometryContainer.removeChildren().forEach((c) => c.destroy());
     entitiesContainer.removeChildren().forEach((c) => c.destroy());
@@ -167,7 +170,6 @@
     const mapWidth = res.map_size[0] * gridSize;
     const mapHeight = res.map_size[1] * gridSize;
 
-    // Dynamic Grid Properties
     const mainGridWidth = Number(res.grid_line_width) ?? 1.5;
     const subGridWidth = Number(res.subgrid_line_width) ?? 1.0;
     const gridColor = res.grid_color || "#ffffff";
@@ -263,7 +265,6 @@
           .circle(px, py, 8)
           .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
     });
-
     (manifest.entities?.events || []).forEach((ev) => {
       const px = (Number(ev.trigger_bounds?.center?.x) - originX) * gridSize;
       const py = (Number(ev.trigger_bounds?.center?.y) - originY) * gridSize;
@@ -280,7 +281,6 @@
           .circle(px, py, 8)
           .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
     });
-
     (manifest.entities?.landing_zones || []).forEach((lz) => {
       const px = (Number(lz.coordinates?.[0]) - originX) * gridSize;
       const py = (Number(lz.coordinates?.[1]) - originY) * gridSize;
@@ -325,6 +325,42 @@
           .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
     });
 
+    (manifest.geometry.overhead || []).forEach((roof) => {
+      const gfx = new PIXI.Graphics();
+      geometryContainer.addChild(gfx);
+
+      const tint = roof.properties?.tint || "#475569";
+      const opacity = (roof.properties?.opacity ?? 100) / 100;
+      const isHidden = roof.properties?.hidden || false;
+
+      const renderOpacity = isHidden ? opacity * 0.5 : opacity;
+      const strokeColor = isHidden ? 0xef4444 : tint;
+
+      if (selectedIds.has(roof.id)) {
+        tracePath(gfx, roof.path, gridSize, originX, originY, true);
+        gfx.stroke({
+          width: 10,
+          color: 0xffffff,
+          alpha: 0.8,
+          join: "round",
+          cap: "round",
+        });
+      }
+
+      tracePath(gfx, roof.path, gridSize, originX, originY, true);
+
+      if (roof.path && roof.path.length > 2) {
+        gfx.fill({ color: tint, alpha: renderOpacity });
+        gfx.stroke({
+          width: 2,
+          color: strokeColor,
+          alpha: isHidden ? 0.8 : renderOpacity,
+        });
+      } else {
+        gfx.stroke({ width: 4, color: tint, alpha: renderOpacity });
+      }
+    });
+
     (manifest.geometry.walls || []).forEach((wall) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
@@ -347,7 +383,6 @@
         cap: "round",
       });
     });
-
     (manifest.geometry.portals || []).forEach((portal) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
@@ -375,7 +410,6 @@
         cap: "round",
       });
     });
-
     drawDraftingLayer();
 
     if (lightingPreview) {
@@ -412,7 +446,6 @@
       p2: { x: 0, y: mapHeight },
     });
     segments.push({ p1: { x: 0, y: mapHeight }, p2: { x: 0, y: 0 } });
-
     (manifest.geometry?.walls || []).forEach((w) => {
       if (!w.path || w.path.length < 2 || w.properties?.type === "invisible")
         return;
@@ -429,7 +462,6 @@
         });
       }
     });
-
     (manifest.geometry?.portals || []).forEach((p) => {
       if (!p.path || p.path.length < 2 || p.properties?.state === "open")
         return;
@@ -446,14 +478,12 @@
         });
       }
     });
-
     shadowGfx
       .moveTo(0, 0)
       .lineTo(mapWidth, 0)
       .lineTo(mapWidth, mapHeight)
       .lineTo(0, mapHeight)
       .closePath();
-
     (manifest.entities?.lights || []).forEach((light) => {
       const lx = (Number(light.position?.x) - originX) * gridSize;
       const ly = (Number(light.position?.y) - originY) * gridSize;
@@ -549,7 +579,37 @@
     shadowGfx.fill({ color: 0x000000, alpha: 0.85 });
   }
 
-  let draftingLayerGfx = null;
+  function drawBoxSelection() {
+    if (!geometryContainer || !activeMap) return;
+    if (boxSelectGfx) {
+      boxSelectGfx.destroy();
+      boxSelectGfx = null;
+    }
+    if (isBoxSelecting && boxSelectStart && boxSelectEnd) {
+      boxSelectGfx = new PIXI.Graphics();
+      geometryContainer.addChild(boxSelectGfx);
+
+      const res = activeMap.manifest.resolution;
+      const gridSize = Number(res.pixels_per_grid) || 70;
+      const originX = Number(res.map_origin[0]) || 0;
+      const originY = Number(res.map_origin[1]) || 0;
+
+      const sx = (boxSelectStart.x - originX) * gridSize;
+      const sy = (boxSelectStart.y - originY) * gridSize;
+      const ex = (boxSelectEnd.x - originX) * gridSize;
+      const ey = (boxSelectEnd.y - originY) * gridSize;
+
+      boxSelectGfx.rect(
+        Math.min(sx, ex),
+        Math.min(sy, ey),
+        Math.abs(ex - sx),
+        Math.abs(ey - sy),
+      );
+      boxSelectGfx.fill({ color: 0x00f0ff, alpha: 0.1 });
+      boxSelectGfx.stroke({ width: 1, color: 0x00f0ff, alpha: 0.8 });
+    }
+  }
+
   function drawDraftingLayer() {
     if (!geometryContainer || !activeMap) return;
 
@@ -558,7 +618,7 @@
       draftingLayerGfx = null;
     }
 
-    if (draftingPath.length > 0 && draftingPreview) {
+    if (draftingPath.length > 0) {
       draftingLayerGfx = new PIXI.Graphics();
       geometryContainer.addChild(draftingLayerGfx);
 
@@ -567,10 +627,25 @@
       const originX = Number(res.map_origin[0]) || 0;
       const originY = Number(res.map_origin[1]) || 0;
 
-      const pts = [...draftingPath, draftingPreview];
-      const dColor = activeTool === "wall" ? 0x00f0ff : 0xffa500;
+      const pts = draftingPreview
+        ? [...draftingPath, draftingPreview]
+        : [...draftingPath];
 
-      tracePath(draftingLayerGfx, pts, gridSize, originX, originY);
+      const dColor =
+        activeTool === "wall"
+          ? 0x00f0ff
+          : activeTool === "roof"
+            ? 0x22c55e
+            : 0xffa500;
+
+      tracePath(
+        draftingLayerGfx,
+        pts,
+        gridSize,
+        originX,
+        originY,
+        activeTool === "roof",
+      );
       draftingLayerGfx.stroke({
         width: 4,
         color: dColor,
@@ -578,10 +653,14 @@
         join: "round",
         cap: "round",
       });
+
+      if (activeTool === "roof" && pts.length > 2) {
+        draftingLayerGfx.fill({ color: dColor, alpha: 0.2 });
+      }
     }
   }
 
-  function tracePath(gfx, path, gridSize, originX, originY) {
+  function tracePath(gfx, path, gridSize, originX, originY, closePath = false) {
     if (!path || path.length < 2) return;
     for (let i = 0; i < path.length; i++) {
       const px = (Number(path[i].x) - originX) * gridSize;
@@ -590,6 +669,7 @@
       if (i === 0) gfx.moveTo(px, py);
       else gfx.lineTo(px, py);
     }
+    if (closePath && path.length > 2) gfx.closePath();
   }
 
   // --- INTERACTION LOGIC ---
@@ -622,7 +702,7 @@
     return snapPoint;
   }
 
-  function getGridCoordinates(clientX, clientY, e_shiftKey) {
+  function getGridCoordinates(clientX, clientY, e_shiftKey, currentToolAction) {
     if (!activeMap)
       return { exactX: 0, exactY: 0, snapX: 0, snapY: 0, gridSize: 70 };
     const rect = canvasContainer.getBoundingClientRect();
@@ -644,26 +724,36 @@
     let snapY = exactY;
     let isVectorSnapped = false;
 
-    // Detect if we are using or dragging a free-place tool
-    let isFreeTool = ["light", "audio", "emitter"].includes(activeTool);
-    if (activeTool === "select" && draggedItemId) {
-      const m = manifest;
-      const isFreeEntity =
-        m.entities?.lights?.some((i) => i.id === draggedItemId) ||
-        m.entities?.audio?.zones?.some((i) => i.id === draggedItemId) ||
-        m.entities?.emitters?.some((i) => i.id === draggedItemId);
-      if (isFreeEntity) isFreeTool = true;
+    let draggedCategory = null;
+    if (currentToolAction === "select" && draggedItemId) {
+      if (manifest.entities?.lights?.some((i) => i.id === draggedItemId))
+        draggedCategory = "light";
+      else if (
+        manifest.entities?.audio?.zones?.some((i) => i.id === draggedItemId)
+      )
+        draggedCategory = "audio";
+      else if (manifest.entities?.emitters?.some((i) => i.id === draggedItemId))
+        draggedCategory = "emitter";
+      else if (
+        manifest.entities?.landing_zones?.some((i) => i.id === draggedItemId)
+      )
+        draggedCategory = "spawn";
+      else if (manifest.entities?.events?.some((i) => i.id === draggedItemId))
+        draggedCategory = "event";
     }
 
-    // Free tools default to NO snap. Shift key ENABLES snap.
-    // Structural tools default to snap. Shift key DISABLES snap.
+    const effectiveAction = draggedCategory || currentToolAction;
+
+    const isFreeTool = ["light", "audio", "emitter"].includes(effectiveAction);
+    const isCenterSnapTool = ["spawn", "event"].includes(effectiveAction);
+
     const shouldSnap = isFreeTool ? e_shiftKey : !e_shiftKey;
 
-    if (activeTool === "spawn" && shouldSnap) {
+    if (isCenterSnapTool && shouldSnap) {
       snapX = Math.floor(exactX) + 0.5;
       snapY = Math.floor(exactY) + 0.5;
       isVectorSnapped = true;
-    } else if (activeTool === "portal" && shouldSnap) {
+    } else if (effectiveAction === "portal" && shouldSnap) {
       const snapDist = 0.5 / unitsPerGrid;
       const edgeSnap = getVectorSnapPoint(
         exactX,
@@ -688,7 +778,31 @@
 
   function handlePointerDown(e) {
     if (!viewportContainer || !activeMap) return;
-    if (e.button === 1 || (e.button === 2 && draftingPath.length === 0)) {
+
+    // --- NODE DELETION ---
+    // Specifically check for NOT panning or box-selection before trying to delete nodes
+    if (e.button === 2 && e.altKey && draftingPath.length === 0) {
+      const coords = getGridCoordinates(
+        e.clientX,
+        e.clientY,
+        e.shiftKey,
+        activeTool,
+      );
+      const thresholdSq = (15 / scale / coords.gridSize) ** 2;
+      const nodeDeleted = mapStore.deleteVectorNode(
+        coords.exactX,
+        coords.exactY,
+        thresholdSq,
+      );
+      if (nodeDeleted) return;
+    }
+
+    // --- PANNING ---
+    if (
+      e.button === 1 ||
+      (e.button === 2 && draftingPath.length === 0 && !e.altKey) ||
+      (e.button === 0 && isSpacePressed)
+    ) {
       isPanning = true;
       dragStart = { x: e.clientX, y: e.clientY };
       originalPan = { x: panX, y: panY };
@@ -704,78 +818,60 @@
     }
 
     if (e.button === 0) {
-      const coords = getGridCoordinates(e.clientX, e.clientY, e.shiftKey);
+      const isTempSelect = (e.ctrlKey || e.metaKey) && activeTool !== "select";
+      const currentToolAction = isTempSelect ? "select" : activeTool;
+
+      const coords = getGridCoordinates(
+        e.clientX,
+        e.clientY,
+        e.shiftKey,
+        currentToolAction,
+      );
       currentGridX = coords.snapX;
       currentGridY = coords.snapY;
 
-      if (e.altKey && activeTool === "select") {
-        let splitOccurred = false;
-        ["walls", "portals"].forEach((cat) => {
-          activeMap.manifest.geometry[cat]?.forEach((item) => {
-            if (splitOccurred || !item.path) return;
-            for (let i = 0; i < item.path.length - 1; i++) {
-              const x1 = Number(item.path[i].x);
-              const y1 = Number(item.path[i].y);
-              const x2 = Number(item.path[i + 1].x);
-              const y2 = Number(item.path[i + 1].y);
-              const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
-              if (l2 === 0) continue;
-              let t = Math.max(
-                0,
-                Math.min(
-                  1,
-                  ((coords.exactX - x1) * (x2 - x1) +
-                    (coords.exactY - y1) * (y2 - y1)) /
-                    l2,
-                ),
-              );
-              const projX = x1 + t * (x2 - x1);
-              const projY = y1 + t * (y2 - y1);
-              const distSq =
-                (coords.exactX - projX) ** 2 + (coords.exactY - projY) ** 2;
-              if (distSq < (15 / scale / coords.gridSize) ** 2) {
-                item.path.splice(i + 1, 0, {
-                  x: coords.exactX,
-                  y: coords.exactY,
-                });
-                splitOccurred = true;
-                mapStore.pushHistory("Split Vector");
-                return;
-              }
-            }
-          });
-        });
+      if (e.altKey && currentToolAction === "select") {
+        const thresholdSq = (15 / scale / coords.gridSize) ** 2;
+        const splitOccurred = mapStore.splitVectorNode(
+          coords.exactX,
+          coords.exactY,
+          thresholdSq,
+        );
         if (splitOccurred) return;
       }
 
-      if (activeTool === "wall" || activeTool === "portal") {
+      if (
+        currentToolAction === "wall" ||
+        currentToolAction === "portal" ||
+        currentToolAction === "roof"
+      ) {
         draftingPath = [...draftingPath, { x: currentGridX, y: currentGridY }];
         drawDraftingLayer();
         return;
       }
 
-      if (activeTool === "light") {
+      if (currentToolAction === "light") {
         mapStore.addLight(currentGridX, currentGridY);
         return;
       }
-      if (activeTool === "audio") {
+      if (currentToolAction === "audio") {
         mapStore.addAudio(currentGridX, currentGridY);
         return;
       }
-      if (activeTool === "event") {
+      if (currentToolAction === "event") {
         mapStore.addEvent(currentGridX, currentGridY);
         return;
       }
-      if (activeTool === "emitter") {
+      if (currentToolAction === "emitter") {
         mapStore.addEmitter(currentGridX, currentGridY);
         return;
       }
-      if (activeTool === "spawn") {
+      if (currentToolAction === "spawn") {
         mapStore.addSpawn(currentGridX, currentGridY);
         return;
       }
 
-      if (activeTool === "select") {
+      if (currentToolAction === "select") {
         const manifest = activeMap.manifest;
         let closestItem = null;
         let minGridDistSq = (15 / scale / coords.gridSize) ** 2;
@@ -842,18 +938,27 @@
           x: Number(i.position?.x),
           y: Number(i.position?.y),
         }));
+
         checkGeometryCollision(manifest.geometry?.walls || []);
         checkGeometryCollision(manifest.geometry?.portals || []);
+        checkGeometryCollision(manifest.geometry?.overhead || []);
 
         if (closestItem) {
-          mapStore.selectItem(
-            closestItem.id,
-            e.shiftKey || e.ctrlKey || e.metaKey,
-          );
+          const isMulti = isTempSelect
+            ? e.shiftKey
+            : e.shiftKey || e.ctrlKey || e.metaKey;
+          mapStore.selectItem(closestItem.id, isMulti);
           draggedItemId = closestItem.id;
           lastDragGrid = { x: currentGridX, y: currentGridY };
         } else {
-          mapStore.clearSelection();
+          const isMulti = isTempSelect
+            ? e.shiftKey
+            : e.shiftKey || e.ctrlKey || e.metaKey;
+          if (!isMulti) mapStore.clearSelection();
+
+          isBoxSelecting = true;
+          boxSelectStart = { x: coords.exactX, y: coords.exactY };
+          boxSelectEnd = { x: coords.exactX, y: coords.exactY };
         }
       }
     }
@@ -868,15 +973,38 @@
     }
 
     if (!activeMap) return;
-    const coords = getGridCoordinates(e.clientX, e.clientY, e.shiftKey);
+
+    const isTempSelect = (e.ctrlKey || e.metaKey) && activeTool !== "select";
+    const currentToolAction = isTempSelect ? "select" : activeTool;
+
+    const coords = getGridCoordinates(
+      e.clientX,
+      e.clientY,
+      e.shiftKey,
+      currentToolAction,
+    );
     currentGridX = coords.snapX;
     currentGridY = coords.snapY;
-    if (activeTool === "wall" || activeTool === "portal") {
+
+    if (isBoxSelecting) {
+      boxSelectEnd = { x: coords.exactX, y: coords.exactY };
+      drawBoxSelection();
+      return;
+    }
+
+    if (
+      currentToolAction === "wall" ||
+      currentToolAction === "portal" ||
+      currentToolAction === "roof"
+    ) {
       draftingPreview = { x: currentGridX, y: currentGridY };
+      drawDraftingLayer();
+    } else if (draftingPreview) {
+      draftingPreview = null;
       drawDraftingLayer();
     }
 
-    if (draggedItemId && activeTool === "select" && lastDragGrid) {
+    if (draggedItemId && currentToolAction === "select" && lastDragGrid) {
       const dx = currentGridX - lastDragGrid.x;
       const dy = currentGridY - lastDragGrid.y;
       mapStore.updateNodePosition(
@@ -890,10 +1018,75 @@
     }
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e) {
     isPanning = false;
     draggedItemId = null;
     lastDragGrid = null;
+
+    if (isBoxSelecting && boxSelectStart && boxSelectEnd) {
+      const minX = Math.min(boxSelectStart.x, boxSelectEnd.x);
+      const maxX = Math.max(boxSelectStart.x, boxSelectEnd.x);
+      const minY = Math.min(boxSelectStart.y, boxSelectEnd.y);
+      const maxY = Math.max(boxSelectStart.y, boxSelectEnd.y);
+
+      const manifest = activeMap.manifest;
+      const hits = [];
+
+      const inBox = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
+
+      const checkEntities = (items, getPos) => {
+        for (const item of items) {
+          const p = getPos(item);
+          if (p && inBox(p.x, p.y)) hits.push(item.id);
+        }
+      };
+
+      const checkGeometries = (items) => {
+        for (const item of items) {
+          if (!item.path) continue;
+          if (item.path.some((pt) => inBox(Number(pt.x), Number(pt.y)))) {
+            hits.push(item.id);
+          }
+        }
+      };
+
+      checkEntities(manifest.entities?.lights || [], (i) => ({
+        x: Number(i.position?.x),
+        y: Number(i.position?.y),
+      }));
+      checkEntities(manifest.entities?.audio?.zones || [], (i) => ({
+        x: Number(i.center?.x),
+        y: Number(i.center?.y),
+      }));
+      checkEntities(manifest.entities?.events || [], (i) => ({
+        x: Number(i.trigger_bounds?.center?.x),
+        y: Number(i.trigger_bounds?.center?.y),
+      }));
+      checkEntities(manifest.entities?.landing_zones || [], (i) => ({
+        x: Number(i.coordinates?.[0]),
+        y: Number(i.coordinates?.[1]),
+      }));
+      checkEntities(manifest.entities?.emitters || [], (i) => ({
+        x: Number(i.position?.x),
+        y: Number(i.position?.y),
+      }));
+
+      checkGeometries(manifest.geometry?.walls || []);
+      checkGeometries(manifest.geometry?.portals || []);
+      checkGeometries(manifest.geometry?.overhead || []);
+
+      if (hits.length > 0) {
+        mapStore.selectItems(hits, true);
+      }
+
+      isBoxSelecting = false;
+      boxSelectStart = null;
+      boxSelectEnd = null;
+      if (boxSelectGfx) {
+        boxSelectGfx.destroy();
+        boxSelectGfx = null;
+      }
+    }
   }
 
   function handleWheel(e) {
@@ -910,6 +1103,12 @@
 
   function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+    if (e.code === "Space") {
+      e.preventDefault();
+      isSpacePressed = true;
+      return;
+    }
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
@@ -935,7 +1134,15 @@
     }
 
     if (e.key === "Escape") {
-      if (draftingPath.length > 0) {
+      if (isBoxSelecting) {
+        isBoxSelecting = false;
+        boxSelectStart = null;
+        boxSelectEnd = null;
+        if (boxSelectGfx) {
+          boxSelectGfx.destroy();
+          boxSelectGfx = null;
+        }
+      } else if (draftingPath.length > 0) {
         draftingPath = [];
         draftingPreview = null;
         drawDraftingLayer();
@@ -954,20 +1161,31 @@
       mapStore.deleteSelected();
     }
   }
+
+  function handleKeyUp(e) {
+    if (e.code === "Space") {
+      isSpacePressed = false;
+    }
+  }
 </script>
 
 <svelte:window
   onkeydown={handleKeyDown}
-  oncontextmenu={(e) => e.preventDefault()}
+  onkeyup={handleKeyUp}
+  onblur={() => (isSpacePressed = false)}
 />
 
 <div
   bind:this={canvasContainer}
-  class="pixi-workspace"
+  class="pixi-workspace {isSpacePressed && !isPanning
+    ? 'space-pressed'
+    : ''} {isPanning ? 'is-panning' : ''}"
   onwheel={handleWheel}
   onpointerdown={handlePointerDown}
   onpointermove={handlePointerMove}
   onpointerup={handlePointerUp}
+  onpointerleave={handlePointerUp}
+  oncontextmenu={(e) => e.preventDefault()}
 ></div>
 
 <style>
@@ -981,7 +1199,10 @@
     background: #05080e;
     cursor: crosshair;
   }
-  .pixi-workspace:active {
-    cursor: grabbing;
+  .pixi-workspace.space-pressed {
+    cursor: grab;
+  }
+  .pixi-workspace.is-panning {
+    cursor: grabbing !important;
   }
 </style>

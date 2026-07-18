@@ -1,6 +1,7 @@
 <script>
   import { mapStore } from "$lib/stores/mapStore.svelte.js";
   import { upgradeLegacyMap } from "$lib/utils/legacyParser.js";
+  import { uiStore } from "$lib/stores/uiStore.svelte.js";
 
   let fileInput;
   let isDragging = $state(false);
@@ -14,26 +15,40 @@
     for (const file of files) {
       const fileName = file.name.toLowerCase();
 
-      // 1. Intercept our new Secure Archives and Project files
-      if (fileName.endsWith(".zip") || fileName.endsWith(".uvtt-proj")) {
-        await mapStore.loadProjectFromFile(file);
-        projectLoaded = true;
-        break; // A project/zip overwrites the store, so we stop parsing other files
-      }
-      // 2. Route standard legacy files to the parser
-      else {
-        const text = await file.text();
-        const parsedMap = upgradeLegacyMap(text, file.name);
-        if (parsedMap) parsedMaps.push(parsedMap);
+      try {
+        // 1. Intercept our new Secure Archives and Project files
+        if (fileName.endsWith(".zip") || fileName.endsWith(".uvtt-proj")) {
+          await mapStore.loadProjectFromFile(file);
+          projectLoaded = true;
+          uiStore.addToast(
+            `Successfully loaded project: ${file.name}`,
+            "success",
+          );
+          break; // A project/zip overwrites the store, so we stop parsing other files
+        }
+        // 2. Route standard legacy files to the parser
+        else {
+          const text = await file.text();
+          const parsedMap = upgradeLegacyMap(text, file.name);
+          if (parsedMap) parsedMaps.push(parsedMap);
+        }
+      } catch (err) {
+        console.error("Error reading file:", err);
+        uiStore.addToast(`Failed to read file: ${file.name}`, "error");
       }
     }
 
     // Only set the catalog if we parsed individual legacy maps and didn't load a full project
     if (!projectLoaded && parsedMaps.length > 0) {
       mapStore.setCatalog(parsedMaps);
+      uiStore.addToast(
+        `Successfully loaded ${parsedMaps.length} map(s).`,
+        "success",
+      );
     } else if (!projectLoaded && parsedMaps.length === 0) {
-      alert(
+      uiStore.addToast(
         "Failed to parse map files. Ensure they are valid .dd2vtt, .uvtt, or .zip files.",
+        "error",
       );
     }
 
