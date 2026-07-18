@@ -12,12 +12,13 @@
   let entitiesContainer;
   let shadowContainer;
 
-  let scale = 1;
-  let panX = 0;
-  let panY = 0;
+  // --- REACTIVE VIEWPORT STATE ---
+  let scale = $state(1);
+  let panX = $state(0);
+  let panY = $state(0);
 
   let currentMapId = null;
-  let isPanning = false;
+  let isPanning = $state(false);
   let dragStart = { x: 0, y: 0 };
   let originalPan = { x: 0, y: 0 };
 
@@ -40,6 +41,7 @@
 
   let draftingPath = $state([]);
   let draftingPreview = $state(null);
+  let draftingLayerGfx = null;
 
   onMount(async () => {
     if (!canvasContainer) return;
@@ -157,6 +159,7 @@
       !shadowContainer
     )
       return;
+
     gridContainer.removeChildren().forEach((c) => c.destroy());
     geometryContainer.removeChildren().forEach((c) => c.destroy());
     entitiesContainer.removeChildren().forEach((c) => c.destroy());
@@ -170,172 +173,162 @@
     const mapWidth = res.map_size[0] * gridSize;
     const mapHeight = res.map_size[1] * gridSize;
 
-    const mainGridWidth = Number(res.grid_line_width) ?? 1.5;
-    const subGridWidth = Number(res.subgrid_line_width) ?? 1.0;
-    const gridColor = res.grid_color || "#ffffff";
-
     const subGridGfx = new PIXI.Graphics();
     gridContainer.addChild(subGridGfx);
     const subGridSize = gridSize / unitsPerGrid;
     for (let x = 0; x <= mapWidth; x += subGridSize) {
-      subGridGfx.moveTo(x, 0);
-      subGridGfx.lineTo(x, mapHeight);
+      subGridGfx.moveTo(x, 0).lineTo(x, mapHeight);
     }
     for (let y = 0; y <= mapHeight; y += subGridSize) {
-      subGridGfx.moveTo(0, y);
-      subGridGfx.lineTo(mapWidth, y);
+      subGridGfx.moveTo(0, y).lineTo(mapWidth, y);
     }
-    subGridGfx.stroke({ width: subGridWidth, color: gridColor, alpha: 0.05 });
+    subGridGfx.stroke({
+      width: 1,
+      color: res.grid_color || 0xffffff,
+      alpha: 0.05,
+    });
 
     const mainGridGfx = new PIXI.Graphics();
     gridContainer.addChild(mainGridGfx);
     for (let x = 0; x <= mapWidth; x += gridSize) {
-      mainGridGfx.moveTo(x, 0);
-      mainGridGfx.lineTo(x, mapHeight);
+      mainGridGfx.moveTo(x, 0).lineTo(x, mapHeight);
     }
     for (let y = 0; y <= mapHeight; y += gridSize) {
-      mainGridGfx.moveTo(0, y);
-      mainGridGfx.lineTo(mapWidth, y);
+      mainGridGfx.moveTo(0, y).lineTo(mapWidth, y);
     }
-    mainGridGfx.stroke({ width: mainGridWidth, color: gridColor, alpha: 0.2 });
+    mainGridGfx.stroke({
+      width: 1.5,
+      color: res.grid_color || 0xffffff,
+      alpha: 0.2,
+    });
 
     const selectedIds = new Set(mapStore.selectedItemIds);
     const entGfx = new PIXI.Graphics();
     entitiesContainer.addChild(entGfx);
 
-    (manifest.entities?.lights || []).forEach((light) => {
-      const px = (Number(light.position?.x) - originX) * gridSize;
-      const py = (Number(light.position?.y) - originY) * gridSize;
-      if (isNaN(px) || isNaN(py)) return;
+    // QuadTree viewport bounding box (converted to Grid Units)
+    const viewportBounds = {
+      x: -panX / scale / gridSize + originX,
+      y: -panY / scale / gridSize + originY,
+      w: window.innerWidth / scale / gridSize,
+      h: window.innerHeight / scale / gridSize,
+    };
 
-      const bRad = (Number(light.properties?.radius?.bright) || 5) * gridSize;
-      const dRad = (Number(light.properties?.radius?.dim) || 10) * gridSize;
-      const colorStr = light.properties?.color || "#ffffff";
-      const isDir = light.type === "directional";
+    const visibleEntities = mapStore.quadtree?.retrieve(viewportBounds) || [];
+    const visibleEntityObjects = visibleEntities
+      .map((v) => {
+        return (
+          manifest.entities?.lights?.find((e) => e.id === v.id) ||
+          manifest.entities?.audio?.zones?.find((e) => e.id === v.id) ||
+          manifest.entities?.events?.find((e) => e.id === v.id) ||
+          manifest.entities?.landing_zones?.find((e) => e.id === v.id) ||
+          manifest.entities?.emitters?.find((e) => e.id === v.id)
+        );
+      })
+      .filter(Boolean);
 
-      if (isDir) {
-        const rot = Number(light.properties?.rotation) || 0;
-        const cone = Number(light.properties?.cone_angle) || 60;
-        const startAngle = (rot - cone / 2) * (Math.PI / 180);
-        const endAngle = (rot + cone / 2) * (Math.PI / 180);
-
-        entGfx
-          .moveTo(px, py)
-          .arc(px, py, dRad, startAngle, endAngle)
-          .closePath()
-          .fill({ color: colorStr, alpha: 0.05 })
-          .stroke({ width: 1, color: colorStr, alpha: 0.2 });
-        entGfx
-          .moveTo(px, py)
-          .arc(px, py, bRad, startAngle, endAngle)
-          .closePath()
-          .fill({ color: colorStr, alpha: 0.1 })
-          .stroke({ width: 1.5, color: colorStr, alpha: 0.4 });
-      } else {
+    // --- RENDER VISIBLE ENTITIES ---
+    visibleEntityObjects.forEach((ent) => {
+      if (ent.properties?.radius) {
+        // LIGHTS
+        const px = (Number(ent.position.x) - originX) * gridSize;
+        const py = (Number(ent.position.y) - originY) * gridSize;
+        const bRad = (Number(ent.properties.radius.bright) || 5) * gridSize;
+        const dRad = (Number(ent.properties.radius.dim) || 10) * gridSize;
+        const color = ent.properties.color || "#ffffff";
         entGfx
           .circle(px, py, dRad)
-          .fill({ color: colorStr, alpha: 0.05 })
-          .stroke({ width: 1, color: colorStr, alpha: 0.2 });
+          .fill({ color, alpha: 0.05 })
+          .stroke({ width: 1, color, alpha: 0.2 });
         entGfx
           .circle(px, py, bRad)
-          .fill({ color: colorStr, alpha: 0.1 })
-          .stroke({ width: 1.5, color: colorStr, alpha: 0.4 });
+          .fill({ color, alpha: 0.1 })
+          .stroke({ width: 1.5, color, alpha: 0.4 });
+        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+        if (selectedIds.has(ent.id))
+          entGfx
+            .circle(px, py, 8)
+            .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
+      } else if (ent.center) {
+        // AUDIO ZONES
+        const px = (Number(ent.center.x) - originX) * gridSize;
+        const py = (Number(ent.center.y) - originY) * gridSize;
+        const rad = (Number(ent.radius) || 5) * gridSize;
+        entGfx
+          .circle(px, py, rad)
+          .fill({ color: 0x3b82f6, alpha: 0.05 })
+          .stroke({ width: 2, color: 0x3b82f6, alpha: 0.4 });
+        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+        if (selectedIds.has(ent.id))
+          entGfx
+            .circle(px, py, 8)
+            .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
+      } else if (ent.trigger_bounds) {
+        // EVENTS
+        const px = (Number(ent.trigger_bounds.center.x) - originX) * gridSize;
+        const py = (Number(ent.trigger_bounds.center.y) - originY) * gridSize;
+        const rad = (Number(ent.trigger_bounds.radius) || 2) * gridSize;
+        entGfx
+          .rect(px - rad, py - rad, rad * 2, rad * 2)
+          .fill({ color: 0xa855f7, alpha: 0.1 })
+          .stroke({ width: 2, color: 0xa855f7, alpha: 0.6 });
+        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+        if (selectedIds.has(ent.id))
+          entGfx
+            .circle(px, py, 8)
+            .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
+      } else if (ent.coordinates) {
+        // SPAWNS (LANDING ZONES)
+        const px = (Number(ent.coordinates[0]) - originX) * gridSize;
+        const py = (Number(ent.coordinates[1]) - originY) * gridSize;
+        const half = gridSize / 2;
+        const color = ent.is_default ? 0x22c55e : 0xeab308;
+
+        if (ent.shape === "circle")
+          entGfx
+            .circle(px, py, half)
+            .fill({ color, alpha: 0.2 })
+            .stroke({ width: 2, color, alpha: 0.8 });
+        else
+          entGfx
+            .rect(px - half, py - half, gridSize, gridSize)
+            .fill({ color, alpha: 0.2 })
+            .stroke({ width: 2, color, alpha: 0.8 });
+
+        // MISSING HANDLE RESTORED
+        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+
+        if (selectedIds.has(ent.id))
+          entGfx
+            .circle(px, py, 8)
+            .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
+      } else if (ent.position && ent.scale !== undefined) {
+        // EMITTERS
+        const px = (Number(ent.position.x) - originX) * gridSize;
+        const py = (Number(ent.position.y) - originY) * gridSize;
+
+        entGfx.moveTo(px - 10, py).lineTo(px + 10, py);
+        entGfx.moveTo(px, py - 10).lineTo(px, py + 10);
+        entGfx.stroke({ width: 3, color: 0x06b6d4, alpha: 0.9 });
+
+        // MISSING HANDLE RESTORED
+        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+
+        if (selectedIds.has(ent.id))
+          entGfx
+            .circle(px, py, 8)
+            .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
       }
-
-      entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
-      if (selectedIds.has(light.id))
-        entGfx
-          .circle(px, py, 8)
-          .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
-    });
-
-    (manifest.entities?.audio?.zones || []).forEach((az) => {
-      const px = (Number(az.center?.x) - originX) * gridSize;
-      const py = (Number(az.center?.y) - originY) * gridSize;
-      if (isNaN(px) || isNaN(py)) return;
-
-      const rad = (Number(az.radius) || 5) * gridSize;
-      entGfx
-        .circle(px, py, rad)
-        .fill({ color: 0x3b82f6, alpha: 0.05 })
-        .stroke({ width: 2, color: 0x3b82f6, alpha: 0.4 });
-      entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
-      if (selectedIds.has(az.id))
-        entGfx
-          .circle(px, py, 8)
-          .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
-    });
-    (manifest.entities?.events || []).forEach((ev) => {
-      const px = (Number(ev.trigger_bounds?.center?.x) - originX) * gridSize;
-      const py = (Number(ev.trigger_bounds?.center?.y) - originY) * gridSize;
-      if (isNaN(px) || isNaN(py)) return;
-
-      const rad = (Number(ev.trigger_bounds?.radius) || 2) * gridSize;
-      entGfx
-        .rect(px - rad, py - rad, rad * 2, rad * 2)
-        .fill({ color: 0xa855f7, alpha: 0.1 })
-        .stroke({ width: 2, color: 0xa855f7, alpha: 0.6 });
-      entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
-      if (selectedIds.has(ev.id))
-        entGfx
-          .circle(px, py, 8)
-          .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
-    });
-    (manifest.entities?.landing_zones || []).forEach((lz) => {
-      const px = (Number(lz.coordinates?.[0]) - originX) * gridSize;
-      const py = (Number(lz.coordinates?.[1]) - originY) * gridSize;
-      if (isNaN(px) || isNaN(py)) return;
-
-      const shape = lz.shape || "circle";
-      const size = gridSize;
-      const half = size / 2;
-      const fillColor = lz.is_default ? 0x22c55e : 0xeab308;
-
-      if (shape === "circle") {
-        entGfx
-          .circle(px, py, half)
-          .fill({ color: fillColor, alpha: 0.2 })
-          .stroke({ width: 2, color: fillColor, alpha: 0.8 });
-      } else {
-        entGfx
-          .rect(px - half, py - half, size, size)
-          .fill({ color: fillColor, alpha: 0.2 })
-          .stroke({ width: 2, color: fillColor, alpha: 0.8 });
-      }
-
-      entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
-      if (selectedIds.has(lz.id)) {
-        entGfx
-          .circle(px, py, 8)
-          .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
-      }
-    });
-
-    (manifest.entities?.emitters || []).forEach((em) => {
-      const px = (Number(em.position?.x) - originX) * gridSize;
-      const py = (Number(em.position?.y) - originY) * gridSize;
-      if (isNaN(px) || isNaN(py)) return;
-
-      entGfx.moveTo(px - 10, py).lineTo(px + 10, py);
-      entGfx.moveTo(px, py - 10).lineTo(px, py + 10);
-      entGfx.stroke({ width: 3, color: 0x06b6d4, alpha: 0.9 });
-      if (selectedIds.has(em.id))
-        entGfx
-          .circle(px, py, 8)
-          .stroke({ width: 3, color: "#00f0ff", alpha: 1 });
     });
 
     (manifest.geometry.overhead || []).forEach((roof) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
-
       const tint = roof.properties?.tint || "#475569";
       const opacity = (roof.properties?.opacity ?? 100) / 100;
       const isHidden = roof.properties?.hidden || false;
-
       const renderOpacity = isHidden ? opacity * 0.5 : opacity;
       const strokeColor = isHidden ? 0xef4444 : tint;
-
       if (selectedIds.has(roof.id)) {
         tracePath(gfx, roof.path, gridSize, originX, originY, true);
         gfx.stroke({
@@ -346,9 +339,7 @@
           cap: "round",
         });
       }
-
       tracePath(gfx, roof.path, gridSize, originX, originY, true);
-
       if (roof.path && roof.path.length > 2) {
         gfx.fill({ color: tint, alpha: renderOpacity });
         gfx.stroke({
@@ -386,7 +377,6 @@
     (manifest.geometry.portals || []).forEach((portal) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
-
       let pColor = 0xffa500;
       if (portal.properties?.type === "window") pColor = 0x3b82f6;
       else if (portal.properties?.type === "secret") pColor = 0xa855f7;
@@ -434,7 +424,6 @@
   ) {
     const shadowGfx = new PIXI.Graphics();
     shadowContainer.addChild(shadowGfx);
-
     const segments = [];
     segments.push({ p1: { x: 0, y: 0 }, p2: { x: mapWidth, y: 0 } });
     segments.push({
@@ -488,9 +477,7 @@
       const lx = (Number(light.position?.x) - originX) * gridSize;
       const ly = (Number(light.position?.y) - originY) * gridSize;
       if (isNaN(lx) || isNaN(ly)) return;
-
       const radius = (Number(light.properties?.radius?.dim) || 10) * gridSize;
-
       const angles = [];
       for (const seg of segments) {
         const minX = Math.min(seg.p1.x, seg.p2.x),
@@ -504,13 +491,11 @@
           minY > ly + radius
         )
           continue;
-
         const a1 = Math.atan2(seg.p1.y - ly, seg.p1.x - lx);
         const a2 = Math.atan2(seg.p2.y - ly, seg.p2.x - lx);
         angles.push(a1 - 0.0001, a1, a1 + 0.0001);
         angles.push(a2 - 0.0001, a2, a2 + 0.0001);
       }
-
       const intersects = [];
       for (let a of angles) {
         const normA = Math.atan2(Math.sin(a), Math.cos(a));
@@ -543,7 +528,6 @@
         }
         intersects.push(intersectPt);
       }
-
       intersects.sort((a, b) => a.angle - b.angle);
       if (intersects.length > 0) {
         if (light.type === "directional") {
@@ -551,18 +535,14 @@
             (Number(light.properties?.rotation) || 0) * (Math.PI / 180);
           const cone =
             (Number(light.properties?.cone_angle) || 60) * (Math.PI / 180);
-          const startAngle = rot - cone / 2;
-          const endAngle = rot + cone / 2;
-
           shadowGfx.moveTo(lx, ly);
           for (let i = intersects.length - 1; i >= 0; i--) {
             let diff = Math.atan2(
               Math.sin(intersects[i].angle - rot),
               Math.cos(intersects[i].angle - rot),
             );
-            if (Math.abs(diff) <= cone / 2 + 0.001) {
+            if (Math.abs(diff) <= cone / 2 + 0.001)
               shadowGfx.lineTo(intersects[i].x, intersects[i].y);
-            }
           }
           shadowGfx.lineTo(lx, ly);
         } else {
@@ -570,9 +550,8 @@
             intersects[intersects.length - 1].x,
             intersects[intersects.length - 1].y,
           );
-          for (let i = intersects.length - 2; i >= 0; i--) {
+          for (let i = intersects.length - 2; i >= 0; i--)
             shadowGfx.lineTo(intersects[i].x, intersects[i].y);
-          }
         }
       }
     });
@@ -588,17 +567,14 @@
     if (isBoxSelecting && boxSelectStart && boxSelectEnd) {
       boxSelectGfx = new PIXI.Graphics();
       geometryContainer.addChild(boxSelectGfx);
-
       const res = activeMap.manifest.resolution;
       const gridSize = Number(res.pixels_per_grid) || 70;
       const originX = Number(res.map_origin[0]) || 0;
       const originY = Number(res.map_origin[1]) || 0;
-
       const sx = (boxSelectStart.x - originX) * gridSize;
       const sy = (boxSelectStart.y - originY) * gridSize;
       const ex = (boxSelectEnd.x - originX) * gridSize;
       const ey = (boxSelectEnd.y - originY) * gridSize;
-
       boxSelectGfx.rect(
         Math.min(sx, ex),
         Math.min(sy, ey),
@@ -612,32 +588,26 @@
 
   function drawDraftingLayer() {
     if (!geometryContainer || !activeMap) return;
-
     if (draftingLayerGfx) {
       draftingLayerGfx.destroy();
       draftingLayerGfx = null;
     }
-
     if (draftingPath.length > 0) {
       draftingLayerGfx = new PIXI.Graphics();
       geometryContainer.addChild(draftingLayerGfx);
-
       const res = activeMap.manifest.resolution;
       const gridSize = Number(res.pixels_per_grid) || 70;
       const originX = Number(res.map_origin[0]) || 0;
       const originY = Number(res.map_origin[1]) || 0;
-
       const pts = draftingPreview
         ? [...draftingPath, draftingPreview]
         : [...draftingPath];
-
       const dColor =
         activeTool === "wall"
           ? 0x00f0ff
           : activeTool === "roof"
             ? 0x22c55e
             : 0xffa500;
-
       tracePath(
         draftingLayerGfx,
         pts,
@@ -653,10 +623,8 @@
         join: "round",
         cap: "round",
       });
-
-      if (activeTool === "roof" && pts.length > 2) {
+      if (activeTool === "roof" && pts.length > 2)
         draftingLayerGfx.fill({ color: dColor, alpha: 0.2 });
-      }
     }
   }
 
@@ -672,8 +640,7 @@
     if (closePath && path.length > 2) gfx.closePath();
   }
 
-  // --- INTERACTION LOGIC ---
-
+  // --- STRICT VECTOR AND CENTER SNAPPING MATH ---
   function getVectorSnapPoint(px, py, walls, snapDistance) {
     let closestDist = snapDistance * snapDistance;
     let snapPoint = null;
@@ -743,10 +710,8 @@
     }
 
     const effectiveAction = draggedCategory || currentToolAction;
-
     const isFreeTool = ["light", "audio", "emitter"].includes(effectiveAction);
     const isCenterSnapTool = ["spawn", "event"].includes(effectiveAction);
-
     const shouldSnap = isFreeTool ? e_shiftKey : !e_shiftKey;
 
     if (isCenterSnapTool && shouldSnap) {
@@ -778,9 +743,6 @@
 
   function handlePointerDown(e) {
     if (!viewportContainer || !activeMap) return;
-
-    // --- NODE DELETION ---
-    // Specifically check for NOT panning or box-selection before trying to delete nodes
     if (e.button === 2 && e.altKey && draftingPath.length === 0) {
       const coords = getGridCoordinates(
         e.clientX,
@@ -796,8 +758,6 @@
       );
       if (nodeDeleted) return;
     }
-
-    // --- PANNING ---
     if (
       e.button === 1 ||
       (e.button === 2 && draftingPath.length === 0 && !e.altKey) ||
@@ -808,7 +768,6 @@
       originalPan = { x: panX, y: panY };
       return;
     }
-
     if (e.button === 2 && draftingPath.length > 1) {
       mapStore.addGeometry(activeTool, [...draftingPath]);
       draftingPath = [];
@@ -816,11 +775,9 @@
       drawDraftingLayer();
       return;
     }
-
     if (e.button === 0) {
       const isTempSelect = (e.ctrlKey || e.metaKey) && activeTool !== "select";
       const currentToolAction = isTempSelect ? "select" : activeTool;
-
       const coords = getGridCoordinates(
         e.clientX,
         e.clientY,
@@ -875,8 +832,18 @@
         const manifest = activeMap.manifest;
         let closestItem = null;
         let minGridDistSq = (15 / scale / coords.gridSize) ** 2;
+
+        const searchRange = {
+          x: coords.exactX - 1,
+          y: coords.exactY - 1,
+          w: 2,
+          h: 2,
+        };
+        const candidates = mapStore.quadtree?.retrieve(searchRange) || [];
+
         const checkEntityCollision = (items, getPos) => {
           for (const item of items) {
+            if (!candidates.find((c) => c.id === item.id)) continue;
             const pos = getPos(item);
             if (!pos || isNaN(pos.x) || isNaN(pos.y)) continue;
             const distSq =
@@ -887,6 +854,7 @@
             }
           }
         };
+
         const checkGeometryCollision = (items) => {
           for (const item of items) {
             const path = item.path || [];
@@ -918,6 +886,7 @@
             }
           }
         };
+
         checkEntityCollision(manifest.entities?.lights || [], (i) => ({
           x: Number(i.position?.x),
           y: Number(i.position?.y),
@@ -955,7 +924,6 @@
             ? e.shiftKey
             : e.shiftKey || e.ctrlKey || e.metaKey;
           if (!isMulti) mapStore.clearSelection();
-
           isBoxSelecting = true;
           boxSelectStart = { x: coords.exactX, y: coords.exactY };
           boxSelectEnd = { x: coords.exactX, y: coords.exactY };
@@ -1028,27 +996,23 @@
       const maxX = Math.max(boxSelectStart.x, boxSelectEnd.x);
       const minY = Math.min(boxSelectStart.y, boxSelectEnd.y);
       const maxY = Math.max(boxSelectStart.y, boxSelectEnd.y);
-
       const manifest = activeMap.manifest;
       const hits = [];
-
       const inBox = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
 
-      const checkEntities = (items, getPos) => {
-        for (const item of items) {
+      const checkEntities = (items, getPos) =>
+        items.forEach((item) => {
           const p = getPos(item);
           if (p && inBox(p.x, p.y)) hits.push(item.id);
-        }
-      };
-
-      const checkGeometries = (items) => {
-        for (const item of items) {
-          if (!item.path) continue;
-          if (item.path.some((pt) => inBox(Number(pt.x), Number(pt.y)))) {
+        });
+      const checkGeometries = (items) =>
+        items.forEach((item) => {
+          if (
+            item.path &&
+            item.path.some((pt) => inBox(Number(pt.x), Number(pt.y)))
+          )
             hits.push(item.id);
-          }
-        }
-      };
+        });
 
       checkEntities(manifest.entities?.lights || [], (i) => ({
         x: Number(i.position?.x),
@@ -1075,10 +1039,7 @@
       checkGeometries(manifest.geometry?.portals || []);
       checkGeometries(manifest.geometry?.overhead || []);
 
-      if (hits.length > 0) {
-        mapStore.selectItems(hits, true);
-      }
-
+      if (hits.length > 0) mapStore.selectItems(hits, true);
       isBoxSelecting = false;
       boxSelectStart = null;
       boxSelectEnd = null;
@@ -1091,8 +1052,9 @@
 
   function handleWheel(e) {
     e.preventDefault();
-    const pointerX = e.clientX;
-    const pointerY = e.clientY;
+    const rect = canvasContainer.getBoundingClientRect();
+    const pointerX = e.clientX - rect.left;
+    const pointerY = e.clientY - rect.top;
     const zoom = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = scale * zoom;
     panX = pointerX - (pointerX - panX) * (newScale / scale);
@@ -1103,17 +1065,14 @@
 
   function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-
     if (e.code === "Space") {
       e.preventDefault();
       isSpacePressed = true;
       return;
     }
-
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
-      if (e.shiftKey) mapStore.redo();
-      else mapStore.undo();
+      e.shiftKey ? mapStore.redo() : mapStore.undo();
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
@@ -1121,7 +1080,6 @@
       mapStore.redo();
       return;
     }
-
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       mapStore.copySelected();
     }
@@ -1132,7 +1090,6 @@
       e.preventDefault();
       mapStore.duplicateSelected();
     }
-
     if (e.key === "Escape") {
       if (isBoxSelecting) {
         isBoxSelecting = false;
@@ -1146,9 +1103,7 @@
         draftingPath = [];
         draftingPreview = null;
         drawDraftingLayer();
-      } else {
-        mapStore.clearSelection();
-      }
+      } else mapStore.clearSelection();
     }
     if (e.key === "Enter" && draftingPath.length > 1) {
       mapStore.addGeometry(activeTool, [...draftingPath]);
@@ -1156,16 +1111,11 @@
       draftingPreview = null;
       drawDraftingLayer();
     }
-
-    if (e.key === "Delete" || e.key === "Backspace") {
-      mapStore.deleteSelected();
-    }
+    if (e.key === "Delete" || e.key === "Backspace") mapStore.deleteSelected();
   }
 
   function handleKeyUp(e) {
-    if (e.code === "Space") {
-      isSpacePressed = false;
-    }
+    if (e.code === "Space") isSpacePressed = false;
   }
 </script>
 
@@ -1177,6 +1127,7 @@
 
 <div
   bind:this={canvasContainer}
+  role="application"
   class="pixi-workspace {isSpacePressed && !isPanning
     ? 'space-pressed'
     : ''} {isPanning ? 'is-panning' : ''}"

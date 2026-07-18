@@ -1,5 +1,66 @@
 import JSZip from 'jszip';
 
+// --- QUAD TREE SPATIAL INDEXING ---
+class QuadTree {
+    constructor(bounds, capacity = 4) {
+        this.bounds = bounds;
+        this.capacity = capacity;
+        this.entities = [];
+        this.divided = false;
+    }
+
+    subdivide() {
+        const { x, y, w, h } = this.bounds;
+        const hw = w / 2;
+        const hh = h / 2;
+        this.nw = new QuadTree({ x, y, w: hw, h: hh }, this.capacity);
+        this.ne = new QuadTree({ x: x + hw, y, w: hw, h: hh }, this.capacity);
+        this.sw = new QuadTree({ x, y: y + hh, w: hw, h: hh }, this.capacity);
+        this.se = new QuadTree({ x: x + hw, y: y + hh, w: hw, h: hh }, this.capacity);
+        this.divided = true;
+    }
+
+    insert(entity) {
+        if (!this.contains(entity)) return false;
+        if (this.entities.length < this.capacity) {
+            this.entities.push(entity);
+            return true;
+        }
+        if (!this.divided) this.subdivide();
+        return (this.nw.insert(entity) || this.ne.insert(entity) || this.sw.insert(entity) || this.se.insert(entity));
+    }
+
+    contains(entity) {
+        const { x, y } = entity.pos;
+        return x >= this.bounds.x && x <= this.bounds.x + this.bounds.w &&
+               y >= this.bounds.y && y <= this.bounds.y + this.bounds.h;
+    }
+
+    retrieve(range, found = []) {
+        if (!this.intersects(range)) return found;
+        for (const entity of this.entities) {
+            if (this.inRange(entity, range)) found.push(entity);
+        }
+        if (this.divided) {
+            this.nw.retrieve(range, found);
+            this.ne.retrieve(range, found);
+            this.sw.retrieve(range, found);
+            this.se.retrieve(range, found);
+        }
+        return found;
+    }
+
+    intersects(range) {
+        return !(range.x > this.bounds.x + this.bounds.w || range.x + range.w < this.bounds.x ||
+                 range.y > this.bounds.y + this.bounds.h || range.y + range.h < this.bounds.y);
+    }
+
+    inRange(entity, range) {
+        const { x, y } = entity.pos;
+        return x >= range.x && x <= range.x + range.w && y >= range.y && y <= range.y + range.h;
+    }
+}
+
 // --- DATABASE AUTO-SAVE HELPER ---
 const DB_NAME = 'uvtt_db';
 const STORE_NAME = 'project_store';
@@ -129,6 +190,14 @@ class MapStore {
     activeTool = $state("select");
     draftingMode = $state("straight"); 
     audioBlobs = $state({}); 
+    quadtree = $state(null);
+
+    // --- RESTORED: VISION CONTROLLER STATE ---
+    vision = $state({
+        enabled: false,
+        token: { x: 0, y: 0, radius: 5 },
+        showFov: true
+    });
 
     _saveTimeout = null;
 
@@ -148,6 +217,7 @@ class MapStore {
             if (saved && saved.catalog && saved.catalog.length > 0) {
                 this.catalog = saved.catalog;
                 this.activeMapId = saved.activeMapId || saved.catalog[0].id;
+                this.updateSpatialIndex();
                 this.updateTrigger++;
             }
         });
@@ -155,6 +225,36 @@ class MapStore {
 
     get activeMap() { return this.catalog.find(m => m.id === this.activeMapId) || null; }
     get redrawTick() { return this.updateTrigger; }
+
+    // --- RESTORED: VISION CONTROLLER METHODS ---
+    toggleVision() {
+        this.vision.enabled = !this.vision.enabled;
+        this.updateTrigger++;
+    }
+
+    updateVisionToken(x, y) {
+        this.vision.token.x = x;
+        this.vision.token.y = y;
+        this.updateTrigger++;
+    }
+
+    updateSpatialIndex() {
+        if (!this.activeMap) return;
+        const m = this.activeMap.manifest;
+        const size = 10000;
+        this.quadtree = new QuadTree({ x: -size/2, y: -size/2, w: size, h: size });
+        
+        const indexEntity = (list, getPos) => list?.forEach(e => {
+            const pos = getPos(e);
+            if (pos) this.quadtree.insert({ pos, id: e.id });
+        });
+        
+        indexEntity(m.entities?.lights, i => ({x: i.position.x, y: i.position.y}));
+        indexEntity(m.entities?.landing_zones, i => ({x: i.coordinates[0], y: i.coordinates[1]}));
+        indexEntity(m.entities?.events, i => ({x: i.trigger_bounds.center.x, y: i.trigger_bounds.center.y}));
+        indexEntity(m.entities?.audio?.zones, i => ({x: i.center.x, y: i.center.y}));
+        indexEntity(m.entities?.emitters, i => ({x: i.position.x, y: i.position.y}));
+    }
 
     // --- IO & PERSISTENCE ---
     triggerAutoSave() {
@@ -497,6 +597,7 @@ class MapStore {
                 this.activeMapId = newCatalog[0].id;
                 this.selectedItemIds = [];
                 this.initHistory();
+                this.updateSpatialIndex();
                 this.updateTrigger++;
                 this.triggerAutoSave();
                 return;
@@ -516,6 +617,7 @@ class MapStore {
                 this.activeMapId = projectData.activeMapId;
                 this.selectedItemIds = [];
                 this.initHistory();
+                this.updateSpatialIndex();
                 this.updateTrigger++;
                 this.triggerAutoSave();
             }
@@ -531,6 +633,7 @@ class MapStore {
             this.activeMapId = this.catalog[0].id;
         }
         this.initHistory();
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
@@ -538,6 +641,7 @@ class MapStore {
     appendLevel(mapData) {
         this.catalog = [...this.catalog, mapData];
         this.switchMap(mapData.id);
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
@@ -546,6 +650,7 @@ class MapStore {
         this.activeMapId = id;
         this.selectedItemIds = [];
         this.initHistory();
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
@@ -566,6 +671,7 @@ class MapStore {
         };
         this.catalog = [...this.catalog, newMap];
         this.switchMap(newId);
+        this.updateSpatialIndex();
     }
 
     deleteMapLevel(id) {
@@ -577,6 +683,7 @@ class MapStore {
         if (this.activeMapId === id) {
             this.switchMap(this.catalog[0].id);
         } else {
+            this.updateSpatialIndex();
             this.updateTrigger++;
             this.triggerAutoSave();
         }
@@ -673,6 +780,7 @@ class MapStore {
                 activeMap.historyIndex--;
             }
         }
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
@@ -684,6 +792,7 @@ class MapStore {
         const state = activeMap.history[activeMap.historyIndex];
         activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
         this.selectedItemIds = [];
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
@@ -695,6 +804,7 @@ class MapStore {
         const state = activeMap.history[activeMap.historyIndex];
         activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
         this.selectedItemIds = [];
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
@@ -706,11 +816,12 @@ class MapStore {
         const state = activeMap.history[index];
         activeMap.manifest = JSON.parse(JSON.stringify(state.snapshot));
         this.selectedItemIds = [];
+        this.updateSpatialIndex();
         this.updateTrigger++;
         this.triggerAutoSave();
     }
 
-    // --- NODE MUTATIONS (DELEGATED FOR DEEP SVELTE 5 REACTIVITY) ---
+    // --- NODE MUTATIONS ---
     deleteVectorNode(exactX, exactY, thresholdSq) {
         const activeMap = this.activeMap;
         if (!activeMap) return false;
@@ -729,7 +840,7 @@ class MapStore {
 
                     if (distSq < thresholdSq) {
                         item.path.splice(i, 1);
-                        item.path = [...item.path]; // Force Svelte Proxy Reassignment
+                        item.path = [...item.path]; 
                         
                         if (item.path.length < 2) {
                             items.splice(itemIdx, 1);
@@ -737,8 +848,9 @@ class MapStore {
                         }
                         
                         nodeDeleted = true;
-                        activeMap.manifest.geometry[cat] = [...items]; // Force Svelte Proxy Reassignment
+                        activeMap.manifest.geometry[cat] = [...items]; 
                         this.pushHistory("Delete Vector Node");
+                        this.updateSpatialIndex();
                         this.updateTrigger++;
                         return;
                     }
@@ -774,10 +886,11 @@ class MapStore {
 
                     if (distSq < thresholdSq) {
                         item.path.splice(i + 1, 0, { x: exactX, y: exactY });
-                        item.path = [...item.path]; // Force Svelte Proxy Reassignment
+                        item.path = [...item.path]; 
                         splitOccurred = true;
-                        activeMap.manifest.geometry[cat] = [...items]; // Force Svelte Proxy Reassignment
+                        activeMap.manifest.geometry[cat] = [...items]; 
                         this.pushHistory("Split Vector");
+                        this.updateSpatialIndex();
                         this.updateTrigger++;
                         return;
                     }
@@ -815,6 +928,7 @@ class MapStore {
             activeMap.manifest.geometry.overhead.push({ id, path, properties: JSON.parse(JSON.stringify(this.defaultSettings.roof.properties)) });
         }
         this.pushHistory(`Added ${type}`);
+        this.updateSpatialIndex();
     }
 
     addLight(x, y) {
@@ -830,6 +944,7 @@ class MapStore {
         if (!activeMap.manifest.entities.lights) activeMap.manifest.entities.lights = [];
         activeMap.manifest.entities.lights.push(light);
         this.pushHistory("Added Light");
+        this.updateSpatialIndex();
     }
 
     addSpawn(x, y) {
@@ -848,6 +963,7 @@ class MapStore {
         if (!activeMap.manifest.entities.landing_zones) activeMap.manifest.entities.landing_zones = [];
         activeMap.manifest.entities.landing_zones.push(spawn);
         this.pushHistory("Added Spawn");
+        this.updateSpatialIndex();
     }
 
     addEvent(x, y) {
@@ -915,6 +1031,7 @@ class MapStore {
         activeMap.manifest.entities.events.push(newEvent);
 
         this.pushHistory(ds.autoCreateMatch ? "Generated Reciprocal Links" : "Added Event");
+        this.updateSpatialIndex();
 
         if (ds.autoCreateMatch) {
             this.updateDefaultSetting('event', 'autoCreateMatch', false);
@@ -934,6 +1051,7 @@ class MapStore {
         if (!activeMap.manifest.entities.audio.zones) activeMap.manifest.entities.audio.zones = [];
         activeMap.manifest.entities.audio.zones.push(audio);
         this.pushHistory("Added Audio Zone");
+        this.updateSpatialIndex();
     }
 
     addEmitter(x, y) {
@@ -950,6 +1068,7 @@ class MapStore {
         if (!activeMap.manifest.entities.emitters) activeMap.manifest.entities.emitters = [];
         activeMap.manifest.entities.emitters.push(emitter);
         this.pushHistory("Added Emitter");
+        this.updateSpatialIndex();
     }
 
     // --- MUTATIONS ---
@@ -1005,6 +1124,7 @@ class MapStore {
             }
             obj[keys[keys.length - 1]] = value;
             this.pushHistory("Modified Property");
+            this.updateSpatialIndex();
             this.updateTrigger++; 
         }
     }
@@ -1035,6 +1155,7 @@ class MapStore {
         if (em && em.position) { em.position.x = exactX; em.position.y = exactY; }
 
         this.pushHistory("Moved Item");
+        this.updateSpatialIndex();
     }
 
     translateSelection(dx, dy) {
@@ -1060,6 +1181,7 @@ class MapStore {
             if (aud && aud.center) { aud.center.x += dx; aud.center.y += dy; }
         });
         this.pushHistory("Translated Selection");
+        this.updateSpatialIndex();
     }
 
     deleteSelected() {
@@ -1093,6 +1215,7 @@ class MapStore {
 
         this.selectedItemIds = [];
         this.pushHistory("Deleted Selection");
+        this.updateSpatialIndex();
         this.updateTrigger++;
     }
 
@@ -1116,6 +1239,7 @@ class MapStore {
             if (!m.geometry[targetCategory]) m.geometry[targetCategory] = [];
             m.geometry[targetCategory].push(foundItem);
             this.pushHistory("Converted Entity");
+            this.updateSpatialIndex();
         }
     }
 
@@ -1126,7 +1250,7 @@ class MapStore {
         this.selectedItemIds.forEach(id => {
             const wall = m.geometry.walls?.find(i => i.id === id);
             if (wall && wall.path.length > 2) {
-                wall.path = pointsToBeBezier(wall.path);
+                wall.path = pointsToBezier(wall.path);
                 wall.isBezier = true; 
             }
         });
@@ -1182,6 +1306,7 @@ class MapStore {
         });
         this.selectedItemIds = newSelection;
         this.pushHistory("Pasted Items");
+        this.updateSpatialIndex();
     }
 
     duplicateSelected() {
