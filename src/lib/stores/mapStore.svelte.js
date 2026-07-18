@@ -126,6 +126,10 @@ function verifyAndCleanManifest(rawManifest) {
         if (m.geometry && m.geometry[cat]) {
             m.geometry[cat] = m.geometry[cat].filter(item => {
                 if (!item.path || !Array.isArray(item.path) || item.path.length < 2) return false;
+                if (!item.properties) item.properties = {};
+                // Inject the 3D UVTT v2 Schema Bounds if missing
+                if (!isNum(item.properties.bottom)) item.properties.bottom = (cat === 'overhead' ? 10.0 : 0.0);
+                if (!isNum(item.properties.top)) item.properties.top = (cat === 'overhead' ? 20.0 : 10.0);
                 return item.path.every(pt => isNum(pt.x) && isNum(pt.y));
             });
         }
@@ -144,7 +148,9 @@ function verifyAndCleanManifest(rawManifest) {
         }
         if (m.entities.landing_zones) {
             m.entities.landing_zones = m.entities.landing_zones.filter(lz => {
-                return lz.coordinates && Array.isArray(lz.coordinates) && isNum(lz.coordinates[0]) && isNum(lz.coordinates[1]);
+                const isValidCoords = lz.coordinates && Array.isArray(lz.coordinates) && isNum(lz.coordinates[0]) && isNum(lz.coordinates[1]);
+                if (isValidCoords && !isNum(lz.heading_degrees)) lz.heading_degrees = 0.0;
+                return isValidCoords;
             });
         }
         if (m.entities.events) {
@@ -191,8 +197,8 @@ class MapStore {
     draftingMode = $state("straight"); 
     audioBlobs = $state({}); 
     quadtree = $state(null);
-
-    // --- RESTORED: VISION CONTROLLER STATE ---
+    
+    // --- VISION CONTROLLER STATE ---
     vision = $state({
         enabled: false,
         token: { x: 0, y: 0, radius: 5 },
@@ -201,12 +207,13 @@ class MapStore {
 
     _saveTimeout = null;
 
+    // --- SCHEMA COMPLIANT DEFAULTS ---
     defaultSettings = $state({
-        wall: { properties: { type: 'standard' } },
-        portal: { properties: { type: 'door', state: 'closed' } },
-        roof: { properties: { tint: '#475569', opacity: 100, hidden: false } },
+        wall: { properties: { type: 'standard', bottom: 0.0, top: 10.0 } },
+        portal: { properties: { type: 'door', state: 'closed', bottom: 0.0, top: 10.0 } },
+        roof: { properties: { tint: '#475569', opacity: 100, hidden: false, bottom: 10.0, top: 20.0 } },
         light: { type: 'point', position: { z: 0 }, properties: { color: '#ffffff', intensity: 1.0, decay_model: 'inverse_square', radius: { bright: 5.0, dim: 10.0 }, animation: { profile: 'none', speed: 0.5, intensity_variance: 0.2 }, rotation: 0, cone_angle: 60 } },
-        spawn: { name: 'New Spawn', shape: 'circle', is_default: false },
+        spawn: { name: 'New Spawn', shape: 'circle', is_default: false, heading_degrees: 0.0 },
         event: { name: 'New Event', eventType: 'Trap/Door Trigger', activation: 'proximity', trigger_bounds: { radius: 0.5 }, targetSpawnId: "", autoCreateMatch: false, targetFloorId: "" },
         audio: { track: "", volume: 100, radius: 5, inner_radius: 2.5, muffledByWalls: true },
         emitter: { type: 'weather', style: 'rain', isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100, direction: 180, speed: 50, intensity: 50, variance: 10, graphic: '', position: { z: 0 } }
@@ -226,7 +233,7 @@ class MapStore {
     get activeMap() { return this.catalog.find(m => m.id === this.activeMapId) || null; }
     get redrawTick() { return this.updateTrigger; }
 
-    // --- RESTORED: VISION CONTROLLER METHODS ---
+    // --- VISION CONTROLLER METHODS ---
     toggleVision() {
         this.vision.enabled = !this.vision.enabled;
         this.updateTrigger++;
@@ -951,7 +958,14 @@ class MapStore {
         const activeMap = this.activeMap;
         if (!activeMap) return;
         const ds = this.defaultSettings.spawn;
-        const spawn = { id: crypto.randomUUID(), coordinates: [x, y], name: ds.name, shape: ds.shape, is_default: ds.is_default };
+        const spawn = { 
+            id: crypto.randomUUID(), 
+            coordinates: [x, y], 
+            name: ds.name, 
+            shape: ds.shape, 
+            is_default: ds.is_default,
+            heading_degrees: ds.heading_degrees 
+        };
         
         if (ds.is_default) {
             if (activeMap.manifest.entities.landing_zones) {
@@ -1002,7 +1016,8 @@ class MapStore {
                     coordinates: [x + offset, y], 
                     name: `Return from ${targetMap.filename || 'Target'}`, 
                     shape: 'circle', 
-                    is_default: false
+                    is_default: false,
+                    heading_degrees: 0.0
                 });
 
                 if (!targetMap.manifest.entities.events) targetMap.manifest.entities.events = [];
@@ -1022,7 +1037,8 @@ class MapStore {
                     coordinates: [x + offset, y], 
                     name: `Arrival from ${activeMap.filename || 'Origin'}`, 
                     shape: 'circle', 
-                    is_default: false
+                    is_default: false,
+                    heading_degrees: 0.0
                 });
             }
         }
