@@ -33,12 +33,6 @@
   let boxSelectEnd = null;
   let boxSelectGfx = null;
 
-  // --- BOX TRACE STATE ---
-  let isBoxTracing = false;
-  let traceBoxStart = null;
-  let traceBoxEnd = null;
-  let traceBoxGfx = null;
-
   let activeMap = $derived(mapStore.activeMap);
   let activeTool = $derived(mapStore.activeTool);
   let lightingPreview = $derived(mapStore.lightingPreview);
@@ -530,36 +524,6 @@
     }
   }
 
-  function drawTraceBox() {
-    if (!geometryContainer || !activeMap) return;
-    if (traceBoxGfx) {
-      traceBoxGfx.destroy();
-      traceBoxGfx = null;
-    }
-    if (isBoxTracing && traceBoxStart && traceBoxEnd) {
-      traceBoxGfx = new PIXI.Graphics();
-      geometryContainer.addChild(traceBoxGfx);
-      const res = activeMap.manifest.resolution;
-      const gridSize = Number(res.pixels_per_grid) || 70;
-      const originX = Number(res.map_origin[0]) || 0;
-      const originY = Number(res.map_origin[1]) || 0;
-
-      const sx = (traceBoxStart.x - originX) * gridSize;
-      const sy = (traceBoxStart.y - originY) * gridSize;
-      const ex = (traceBoxEnd.x - originX) * gridSize;
-      const ey = (traceBoxEnd.y - originY) * gridSize;
-
-      traceBoxGfx.rect(
-        Math.min(sx, ex),
-        Math.min(sy, ey),
-        Math.abs(ex - sx),
-        Math.abs(ey - sy),
-      );
-      traceBoxGfx.fill({ color: 0xff00ff, alpha: 0.1 });
-      traceBoxGfx.stroke({ width: 2, color: 0xff00ff, alpha: 0.8 });
-    }
-  }
-
   function drawDraftingLayer() {
     if (!geometryContainer || !activeMap) return;
     if (draftingLayerGfx) {
@@ -612,234 +576,6 @@
       else gfx.lineTo(px, py);
     }
     if (closePath && path.length > 2) gfx.closePath();
-  }
-
-  // --- CORE MATH HELPERS ---
-  function buildCollisionSegments(
-    manifest,
-    originX,
-    originY,
-    gridSize,
-    mapWidth,
-    mapHeight,
-  ) {
-    const segments = [];
-    segments.push({ p1: { x: 0, y: 0 }, p2: { x: mapWidth, y: 0 } });
-    segments.push({
-      p1: { x: mapWidth, y: 0 },
-      p2: { x: mapWidth, y: mapHeight },
-    });
-    segments.push({
-      p1: { x: mapWidth, y: mapHeight },
-      p2: { x: 0, y: mapHeight },
-    });
-    segments.push({ p1: { x: 0, y: mapHeight }, p2: { x: 0, y: 0 } });
-
-    (manifest.geometry?.walls || []).forEach((w) => {
-      if (!w.path || w.path.length < 2 || w.properties?.type === "invisible")
-        return;
-      for (let i = 0; i < w.path.length - 1; i++) {
-        segments.push({
-          p1: {
-            x: (w.path[i].x - originX) * gridSize,
-            y: (w.path[i].y - originY) * gridSize,
-          },
-          p2: {
-            x: (w.path[i + 1].x - originX) * gridSize,
-            y: (w.path[i + 1].y - originY) * gridSize,
-          },
-        });
-      }
-    });
-
-    (manifest.geometry?.portals || []).forEach((p) => {
-      if (!p.path || p.path.length < 2 || p.properties?.state === "open")
-        return;
-      for (let i = 0; i < p.path.length - 1; i++) {
-        segments.push({
-          p1: {
-            x: (p.path[i].x - originX) * gridSize,
-            y: (p.path[i].y - originY) * gridSize,
-          },
-          p2: {
-            x: (p.path[i + 1].x - originX) * gridSize,
-            y: (p.path[i + 1].y - originY) * gridSize,
-          },
-        });
-      }
-    });
-    return segments;
-  }
-
-  function calculateVisibilityPolygon(ox, oy, radius, segments) {
-    const angles = [];
-    for (const seg of segments) {
-      const minX = Math.min(seg.p1.x, seg.p2.x),
-        maxX = Math.max(seg.p1.x, seg.p2.x);
-      const minY = Math.min(seg.p1.y, seg.p2.y),
-        maxY = Math.max(seg.p1.y, seg.p2.y);
-      if (
-        maxX < ox - radius ||
-        minX > ox + radius ||
-        maxY < oy - radius ||
-        minY > oy + radius
-      )
-        continue;
-
-      const a1 = Math.atan2(seg.p1.y - oy, seg.p1.x - ox);
-      const a2 = Math.atan2(seg.p2.y - oy, seg.p2.x - ox);
-
-      angles.push(a1 - 0.0001, a1, a1 + 0.0001);
-      angles.push(a2 - 0.0001, a2, a2 + 0.0001);
-    }
-
-    const intersects = [];
-    for (let a of angles) {
-      const normA = Math.atan2(Math.sin(a), Math.cos(a));
-      const dx = Math.cos(normA),
-        dy = Math.sin(normA);
-      const r_dx = dx * radius,
-        r_dy = dy * radius;
-
-      let minT1 = 1;
-      let intersectPt = { x: ox + r_dx, y: oy + r_dy, angle: normA };
-
-      for (const seg of segments) {
-        const s_dx = seg.p2.x - seg.p1.x,
-          s_dy = seg.p2.y - seg.p1.y;
-        const T2 = r_dx * s_dy - r_dy * s_dx;
-        if (T2 === 0) continue;
-
-        const T1 = (seg.p1.x - ox) * s_dy - (seg.p1.y - oy) * s_dx;
-        const t1 = T1 / T2;
-        const t2 = ((seg.p1.x - ox) * r_dy - (seg.p1.y - oy) * r_dx) / T2;
-
-        if (t1 > 0 && t1 < minT1 && t2 >= 0 && t2 <= 1) {
-          minT1 = t1;
-          intersectPt = { x: ox + r_dx * t1, y: oy + r_dy * t1, angle: normA };
-        }
-      }
-      intersects.push(intersectPt);
-    }
-
-    intersects.sort((a, b) => a.angle - b.angle);
-    return intersects;
-  }
-
-  function drawVisionLoS(
-    manifest,
-    originX,
-    originY,
-    gridSize,
-    mapWidth,
-    mapHeight,
-  ) {
-    const shadowGfx = new PIXI.Graphics();
-    shadowContainer.addChild(shadowGfx);
-    const segments = buildCollisionSegments(
-      manifest,
-      originX,
-      originY,
-      gridSize,
-      mapWidth,
-      mapHeight,
-    );
-
-    shadowGfx
-      .moveTo(0, 0)
-      .lineTo(mapWidth, 0)
-      .lineTo(mapWidth, mapHeight)
-      .lineTo(0, mapHeight)
-      .closePath();
-
-    const tx = (vision.token.x - originX) * gridSize;
-    const ty = (vision.token.y - originY) * gridSize;
-    const radius = (vision.token.radius || 20) * gridSize;
-
-    const intersects = calculateVisibilityPolygon(tx, ty, radius, segments);
-
-    if (intersects.length > 0) {
-      shadowGfx.moveTo(
-        intersects[intersects.length - 1].x,
-        intersects[intersects.length - 1].y,
-      );
-      for (let i = intersects.length - 2; i >= 0; i--) {
-        shadowGfx.lineTo(intersects[i].x, intersects[i].y);
-      }
-      shadowGfx.closePath();
-    }
-
-    shadowGfx.fill({ color: 0x000000, alpha: 0.92 });
-    const tokenGfx = new PIXI.Graphics();
-    shadowContainer.addChild(tokenGfx);
-    tokenGfx
-      .circle(tx, ty, gridSize * 0.4)
-      .fill({ color: 0x3b82f6, alpha: 0.8 })
-      .stroke({ width: 3, color: 0xffffff, alpha: 1 });
-    tokenGfx.circle(tx, ty, gridSize * 0.1).fill({ color: 0xffffff });
-  }
-
-  function drawDynamicLighting(
-    manifest,
-    originX,
-    originY,
-    gridSize,
-    mapWidth,
-    mapHeight,
-  ) {
-    const shadowGfx = new PIXI.Graphics();
-    shadowContainer.addChild(shadowGfx);
-    const segments = buildCollisionSegments(
-      manifest,
-      originX,
-      originY,
-      gridSize,
-      mapWidth,
-      mapHeight,
-    );
-    shadowGfx
-      .moveTo(0, 0)
-      .lineTo(mapWidth, 0)
-      .lineTo(mapWidth, mapHeight)
-      .lineTo(0, mapHeight)
-      .closePath();
-
-    (manifest.entities?.lights || []).forEach((light) => {
-      const lx = (Number(light.position?.x) - originX) * gridSize;
-      const ly = (Number(light.position?.y) - originY) * gridSize;
-      if (isNaN(lx) || isNaN(ly)) return;
-      const radius = (Number(light.properties?.radius?.dim) || 10) * gridSize;
-      const intersects = calculateVisibilityPolygon(lx, ly, radius, segments);
-
-      if (intersects.length > 0) {
-        if (light.type === "directional") {
-          const rot =
-            (Number(light.properties?.rotation) || 0) * (Math.PI / 180);
-          const cone =
-            (Number(light.properties?.cone_angle) || 60) * (Math.PI / 180);
-          shadowGfx.moveTo(lx, ly);
-          for (let i = intersects.length - 1; i >= 0; i--) {
-            let diff = Math.atan2(
-              Math.sin(intersects[i].angle - rot),
-              Math.cos(intersects[i].angle - rot),
-            );
-            if (Math.abs(diff) <= cone / 2 + 0.001)
-              shadowGfx.lineTo(intersects[i].x, intersects[i].y);
-          }
-          shadowGfx.lineTo(lx, ly);
-          shadowGfx.closePath();
-        } else {
-          shadowGfx.moveTo(
-            intersects[intersects.length - 1].x,
-            intersects[intersects.length - 1].y,
-          );
-          for (let i = intersects.length - 2; i >= 0; i--)
-            shadowGfx.lineTo(intersects[i].x, intersects[i].y);
-          shadowGfx.closePath();
-        }
-      }
-    });
-    shadowGfx.fill({ color: 0x000000, alpha: 0.85 });
   }
 
   // --- STRICT VECTOR AND CENTER SNAPPING MATH ---
@@ -1037,14 +773,6 @@
         currentToolAction,
       );
 
-      // --- CENTERLINE BOX INTERCEPT ---
-      if (currentToolAction === "wall" && mapStore.boxTraceMode) {
-        isBoxTracing = true;
-        traceBoxStart = { x: coords.exactX, y: coords.exactY };
-        traceBoxEnd = { x: coords.exactX, y: coords.exactY };
-        return;
-      }
-
       currentGridX = coords.snapX;
       currentGridY = coords.snapY;
 
@@ -1203,13 +931,6 @@
       return;
     }
 
-    // --- DRAW THE PINK BOX ---
-    if (isBoxTracing) {
-      traceBoxEnd = { x: coords.exactX, y: coords.exactY };
-      drawTraceBox();
-      return;
-    }
-
     currentGridX = coords.snapX;
     currentGridY = coords.snapY;
     if (isBoxSelecting) {
@@ -1246,24 +967,6 @@
     isPanning = false;
     draggedItemId = null;
     lastDragGrid = null;
-
-    // --- TRIGGER THE GO KERNEL WHEN BOX IS RELEASED ---
-    if (isBoxTracing && traceBoxStart && traceBoxEnd) {
-      mapStore.traceBoxArea(
-        traceBoxStart.x,
-        traceBoxStart.y,
-        traceBoxEnd.x,
-        traceBoxEnd.y,
-      );
-      isBoxTracing = false;
-      traceBoxStart = null;
-      traceBoxEnd = null;
-      if (traceBoxGfx) {
-        traceBoxGfx.destroy();
-        traceBoxGfx = null;
-      }
-      return;
-    }
 
     if (isBoxSelecting && boxSelectStart && boxSelectEnd) {
       const minX = Math.min(boxSelectStart.x, boxSelectEnd.x);
@@ -1366,15 +1069,7 @@
       mapStore.duplicateSelected();
     }
     if (e.key === "Escape") {
-      if (isBoxTracing) {
-        isBoxTracing = false;
-        traceBoxStart = null;
-        traceBoxEnd = null;
-        if (traceBoxGfx) {
-          traceBoxGfx.destroy();
-          traceBoxGfx = null;
-        }
-      } else if (isBoxSelecting) {
+      if (isBoxSelecting) {
         isBoxSelecting = false;
         boxSelectStart = null;
         boxSelectEnd = null;

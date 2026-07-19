@@ -199,7 +199,6 @@ class MapStore {
     selectedItemIds = $state([]);
     clipboard = $state([]);
     lightingPreview = $state(false);
-    boxTraceMode = $state(false);
     activeTool = $state("select");
     draftingMode = $state("straight"); 
     audioBlobs = $state({}); 
@@ -1450,122 +1449,6 @@ class MapStore {
         this.pushHistory("Added Prop Asset");
         this.updateSpatialIndex();
         this.updateTrigger++;
-    }
-
-    // --- 🤖 PRO EXCLUSIVE SMART GEOMETRY AUTO-WALLS ---
-    async autoTraceMapWalls(sensitivityThreshold) {
-        if (!this.activeMap || !this.activeMap.imageUrl) {
-            alert("No map background image loaded to trace.");
-            return;
-        }
-
-        if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoTraceWalls) {
-            try {
-                let payload = this.activeMap.imageUrl;
-                
-                // If the image is a browser Blob, convert it to Base64 for the Go backend
-                if (payload.startsWith('blob:') || payload.startsWith('http')) {
-                    const res = await fetch(payload);
-                    const blob = await res.blob();
-                    payload = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.readAsDataURL(blob);
-                    });
-                }
-
-                const pixelsPerGrid = parseFloat(this.activeMap.manifest.resolution?.pixels_per_grid) || 70.0;
-                
-                // Invoke Go compute kernel
-                const polylinePaths = await window.go.main.App.AutoTraceWalls(
-                    payload, 
-                    parseFloat(sensitivityThreshold), 
-                    pixelsPerGrid
-                );
-
-                if (polylinePaths && polylinePaths.length > 0) {
-                    if (!this.activeMap.manifest.geometry.walls) {
-                        this.activeMap.manifest.geometry.walls = [];
-                    }
-
-                    polylinePaths.forEach(path => {
-                        const id = crypto.randomUUID();
-                        this.activeMap.manifest.geometry.walls.push({
-                            id: id,
-                            path: path,
-                            isBezier: false,
-                            properties: JSON.parse(JSON.stringify(this.defaultSettings.wall.properties))
-                        });
-                    });
-
-                    this.pushHistory("Auto-Traced Structural Walls");
-                    this.updateSpatialIndex();
-                    this.updateTrigger++;
-                } else {
-                    alert("No walls detected. Try increasing the Edge Sensitivity slider.");
-                }
-            } catch (err) {
-                console.error("Native auto-trace crunching error:", err);
-                alert("Auto-wall tracing operation failed on the backend kernel.");
-            }
-        } else {
-            alert("Auto-Trace requires the premium Wails Desktop standalone runtime environment.");
-        }
-    }
-
-    // --- SMART BOX CENTERLINE TRACE ---
-    async traceBoxArea(exactX1, exactY1, exactX2, exactY2) {
-        if (!this.activeMap || !this.activeMap.imageUrl) return;
-
-        const manifest = this.activeMap.manifest;
-        const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
-        const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
-        const ppg = Number(manifest.resolution?.pixels_per_grid) || 70;
-
-        const pX1 = Math.floor((exactX1 - originX) * ppg);
-        const pY1 = Math.floor((exactY1 - originY) * ppg);
-        const pX2 = Math.floor((exactX2 - originX) * ppg);
-        const pY2 = Math.floor((exactY2 - originY) * ppg);
-
-        if (window.go && window.go.main && window.go.main.App && window.go.main.App.TraceBoxCenterline) {
-            try {
-                let payload = this.activeMap.imageUrl;
-                if (payload.startsWith('blob:') || payload.startsWith('http')) {
-                    const res = await fetch(payload);
-                    const blob = await res.blob();
-                    payload = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.readAsDataURL(blob);
-                    });
-                }
-
-                // Call Go Centerline Kernel
-                const polylinePaths = await window.go.main.App.TraceBoxCenterline(payload, pX1, pY1, pX2, pY2, ppg);
-
-                if (polylinePaths && polylinePaths.length > 0) {
-                    if (!this.activeMap.manifest.geometry.walls) this.activeMap.manifest.geometry.walls = [];
-                    polylinePaths.forEach(path => {
-                        this.activeMap.manifest.geometry.walls.push({
-                            id: crypto.randomUUID(),
-                            path: path,
-                            isBezier: false,
-                            properties: JSON.parse(JSON.stringify(this.defaultSettings.wall.properties))
-                        });
-                    });
-                    this.pushHistory("Box Centerline Trace");
-                    this.updateSpatialIndex();
-                    this.updateTrigger++;
-                } else {
-                    alert("No distinct wall mass found in that box. Try drawing the box slightly wider so it captures the background floor for contrast!");
-                }
-            } catch (err) {
-                console.error("Box trace failed:", err);
-                alert("The Go backend failed to process the image.");
-            }
-        } else {
-            alert("Backend function not found! You must restart 'wails dev' so the Go bindings regenerate.");
-        }
     }
 }
 

@@ -17,20 +17,6 @@
     typeof window !== "undefined" && !!window?.go?.main,
   );
 
-  // --- LOCAL SMART GEOMETRY STATE ---
-  let edgeSensitivity = $state(0.45);
-  let isCrunchingWalls = $state(false);
-
-  async function handleAutoTraceWalls() {
-    if (isCrunchingWalls) return;
-    isCrunchingWalls = true;
-    try {
-      await mapStore.autoTraceMapWalls(edgeSensitivity);
-    } finally {
-      isCrunchingWalls = false;
-    }
-  }
-
   // --- CAD STATUS BAR METRICS ---
   let mouseX = $derived(mapStore.mouseX);
   let mouseY = $derived(mapStore.mouseY);
@@ -864,57 +850,6 @@
                 />
               </label>
             </div>
-            <!-- 🤖 SMART GEOMETRY AUTO-WALL CONTAINER -->
-            <!-- CENTERLINE BOX TOGGLE -->
-            <label
-              class="checkbox-row"
-              style="margin-top: 5px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed rgba(0, 240, 255, 0.2);"
-            >
-              <input type="checkbox" bind:checked={mapStore.boxTraceMode} />
-              <span style="color: #e2e8f0;"
-                >📦 Bounding Box Centerline Mode</span
-              >
-            </label>
-
-            {#if mapStore.boxTraceMode}
-              <p
-                class="helper-text"
-                style="color: #d946ef; margin-bottom: 10px;"
-              >
-                Draw a box over any straight wall segment. The engine will
-                isolate the dark mass and trace a single vector exactly down the
-                center.
-              </p>
-            {:else}
-              <label style="margin-top: 8px;">
-                <span>Global Edge Trace Sensitivity:</span>
-                <div class="slider-row">
-                  <input
-                    type="range"
-                    min="0.05"
-                    max="0.95"
-                    step="0.05"
-                    bind:value={edgeSensitivity}
-                  />
-                  <span
-                    style="font-family: monospace; font-size: 11px; width: 30px; text-align: right; color: #fff;"
-                    >{Math.round(edgeSensitivity * 100)}%</span
-                  >
-                </div>
-              </label>
-              <button
-                class="action-btn wave"
-                style="margin-top: 10px; width: 100%; justify-content: center; font-weight: bold;"
-                onclick={handleAutoTraceWalls}
-                disabled={isCrunchingWalls}
-              >
-                {#if isCrunchingWalls}
-                  <span>⏳ Crunching Pixels...</span>
-                {:else}
-                  <span>🪄 Auto-Trace Entire Canvas</span>
-                {/if}
-              </button>
-            {/if}
           {:else if displayCategory === "portal"}
             <label>
               <span>Portal Architecture:</span>
