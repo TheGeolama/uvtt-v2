@@ -267,16 +267,30 @@
         .stroke({ width: 2, color: 0xef4444, alpha: 0.8 });
     }
 
+    // --- DYNAMIC BOUNDING BOX GRID RENDERING ---
+    // Ensure the grid covers the entirety of the map image, regardless of negative or positive offset
+    const offX = Number(res.map_offset_x) || 0;
+    const offY = Number(res.map_offset_y) || 0;
+    const minX = offX;
+    const maxX = offX + mapWidth;
+    const minY = offY;
+    const maxY = offY + mapHeight;
+
     const subGridGfx = new PIXI.Graphics();
     gridContainer.addChild(subGridGfx);
+
     const subGridSizeX = gridX / unitsPerGrid;
     const subGridSizeY = gridY / unitsPerGrid;
+    const subStartX = Math.floor(minX / subGridSizeX) * subGridSizeX;
+    const subStartY = Math.floor(minY / subGridSizeY) * subGridSizeY;
+    const subEndX = Math.ceil(maxX / subGridSizeX) * subGridSizeX;
+    const subEndY = Math.ceil(maxY / subGridSizeY) * subGridSizeY;
 
-    for (let x = 0; x <= mapWidth; x += subGridSizeX) {
-      subGridGfx.moveTo(x, 0).lineTo(x, mapHeight);
+    for (let x = subStartX; x <= subEndX; x += subGridSizeX) {
+      subGridGfx.moveTo(x, subStartY).lineTo(x, subEndY);
     }
-    for (let y = 0; y <= mapHeight; y += subGridSizeY) {
-      subGridGfx.moveTo(0, y).lineTo(mapWidth, y);
+    for (let y = subStartY; y <= subEndY; y += subGridSizeY) {
+      subGridGfx.moveTo(subStartX, y).lineTo(subEndX, y);
     }
     subGridGfx.stroke({
       width: 1,
@@ -286,11 +300,17 @@
 
     const mainGridGfx = new PIXI.Graphics();
     gridContainer.addChild(mainGridGfx);
-    for (let x = 0; x <= mapWidth; x += gridX) {
-      mainGridGfx.moveTo(x, 0).lineTo(x, mapHeight);
+
+    const startX = Math.floor(minX / gridX) * gridX;
+    const startY = Math.floor(minY / gridY) * gridY;
+    const endX = Math.ceil(maxX / gridX) * gridX;
+    const endY = Math.ceil(maxY / gridY) * gridY;
+
+    for (let x = startX; x <= endX; x += gridX) {
+      mainGridGfx.moveTo(x, startY).lineTo(x, endY);
     }
-    for (let y = 0; y <= mapHeight; y += gridY) {
-      mainGridGfx.moveTo(0, y).lineTo(mapWidth, y);
+    for (let y = startY; y <= endY; y += gridY) {
+      mainGridGfx.moveTo(startX, y).lineTo(endX, y);
     }
     mainGridGfx.stroke({
       width: 1.5,
@@ -1394,7 +1414,6 @@
         });
         mapStore.updateTrigger++;
       } else {
-        // It was a pure click — lock the origin to this exact coordinate!
         mapStore.setGridOrigin(alignBoxStart.x, alignBoxStart.y);
       }
 

@@ -257,11 +257,32 @@ class MapStore {
         if (!this.activeMap) return;
         const res = this.activeMap.manifest.resolution;
         
-        // Pin the absolute (0,0) coordinate of the grid to this exact pixel on the image
-        res.map_offset_x = -imagePixelX;
-        res.map_offset_y = -imagePixelY;
+        const gridX = Number(res.pixels_per_grid) || 70;
+        const gridY = Number(res.pixels_per_grid_y) || gridX;
+
+        // Modulo math ensures the grid intersection perfectly hits the clicked pixel
+        // without physically throwing the image thousands of pixels off the screen!
+        const modX = ((imagePixelX % gridX) + gridX) % gridX;
+        const modY = ((imagePixelY % gridY) + gridY) % gridY;
+
+        res.map_offset_x = -modX;
+        res.map_offset_y = -modY;
         
         this.pushHistory("Pinned Grid Origin");
+        this.updateTrigger++;
+    }
+
+    stepGridOffset(stepsX, stepsY) {
+        if (!this.activeMap) return;
+        const res = this.activeMap.manifest.resolution;
+        
+        const gridX = Number(res.pixels_per_grid) || 70;
+        const gridY = Number(res.pixels_per_grid_y) || gridX;
+        
+        res.map_offset_x = (Number(res.map_offset_x) || 0) + (stepsX * gridX);
+        res.map_offset_y = (Number(res.map_offset_y) || 0) + (stepsY * gridY);
+        
+        this.pushHistory("Stepped Grid Offset");
         this.updateTrigger++;
     }
 
@@ -309,8 +330,11 @@ class MapStore {
         res.map_size[1] = pixelHeight / newPpgY;
         
         // Lock the origin exactly to the top-left corner of the first box drawn
-        res.map_offset_x = -anchorX;
-        res.map_offset_y = -anchorY;
+        const modX = ((anchorX % newPpgX) + newPpgX) % newPpgX;
+        const modY = ((anchorY % newPpgY) + newPpgY) % newPpgY;
+        
+        res.map_offset_x = -modX;
+        res.map_offset_y = -modY;
 
         this.gridAlignBoxes = [];
         this.setTool('select');

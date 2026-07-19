@@ -895,6 +895,39 @@
                 <strong>Or Auto-Align:</strong> Drag green boxes over 1x1 map squares.
               </p>
 
+              <div
+                style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;"
+              >
+                <div style="display: flex; gap: 4px;">
+                  <button
+                    class="action-btn"
+                    style="flex: 1; justify-content: center;"
+                    onclick={() => mapStore.stepGridOffset(1, 0)}
+                    >➡ Step +X</button
+                  >
+                  <button
+                    class="action-btn"
+                    style="flex: 1; justify-content: center;"
+                    onclick={() => mapStore.stepGridOffset(-1, 0)}
+                    >⬅ Step -X</button
+                  >
+                </div>
+                <div style="display: flex; gap: 4px;">
+                  <button
+                    class="action-btn"
+                    style="flex: 1; justify-content: center;"
+                    onclick={() => mapStore.stepGridOffset(0, 1)}
+                    >⬇ Step +Y</button
+                  >
+                  <button
+                    class="action-btn"
+                    style="flex: 1; justify-content: center;"
+                    onclick={() => mapStore.stepGridOffset(0, -1)}
+                    >⬆ Step -Y</button
+                  >
+                </div>
+              </div>
+
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 <button
                   class="action-btn wave"
