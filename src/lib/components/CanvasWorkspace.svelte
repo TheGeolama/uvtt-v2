@@ -12,6 +12,10 @@
   let geometryContainer;
   let entitiesContainer;
   let shadowContainer;
+  let isBoxTracing = false;
+  let traceBoxStart = null;
+  let traceBoxEnd = null;
+  let traceBoxGfx = null;
 
   // --- REACTIVE VIEWPORT STATE ---
   let scale = $state(1);
@@ -752,6 +756,36 @@
     }
   }
 
+  function drawTraceBox() {
+    if (!geometryContainer || !activeMap) return;
+    if (traceBoxGfx) {
+      traceBoxGfx.destroy();
+      traceBoxGfx = null;
+    }
+    if (isBoxTracing && traceBoxStart && traceBoxEnd) {
+      traceBoxGfx = new PIXI.Graphics();
+      geometryContainer.addChild(traceBoxGfx);
+      const res = activeMap.manifest.resolution;
+      const gridSize = Number(res.pixels_per_grid) || 70;
+      const originX = Number(res.map_origin[0]) || 0;
+      const originY = Number(res.map_origin[1]) || 0;
+
+      const sx = (traceBoxStart.x - originX) * gridSize;
+      const sy = (traceBoxStart.y - originY) * gridSize;
+      const ex = (traceBoxEnd.x - originX) * gridSize;
+      const ey = (traceBoxEnd.y - originY) * gridSize;
+
+      traceBoxGfx.rect(
+        Math.min(sx, ex),
+        Math.min(sy, ey),
+        Math.abs(ex - sx),
+        Math.abs(ey - sy),
+      );
+      traceBoxGfx.fill({ color: 0xff00ff, alpha: 0.1 }); // Pink trace box
+      traceBoxGfx.stroke({ width: 2, color: 0xff00ff, alpha: 0.8 });
+    }
+  }
+
   function drawDraftingLayer() {
     if (!geometryContainer || !activeMap) return;
     if (draftingLayerGfx) {
@@ -951,6 +985,13 @@
     if (!viewportContainer || !activeMap) return;
     if (e.button === 0 && vision?.enabled) {
       const coords = getGridCoordinates(e.clientX, e.clientY, false, "select");
+      // --- CENTERLINE BOX INTERCEPT ---
+      if (currentToolAction === "wall" && mapStore.boxTraceMode) {
+        isBoxTracing = true;
+        traceBoxStart = { x: coords.exactX, y: coords.exactY };
+        traceBoxEnd = { x: coords.exactX, y: coords.exactY };
+        return;
+      }
       const distSq =
         (coords.exactX - vision.token.x) ** 2 +
         (coords.exactY - vision.token.y) ** 2;
@@ -1170,6 +1211,11 @@
       drawBoxSelection();
       return;
     }
+    if (isBoxTracing) {
+      traceBoxEnd = { x: coords.exactX, y: coords.exactY };
+      drawTraceBox();
+      return;
+    }
     if (["wall", "portal", "roof"].includes(currentToolAction)) {
       draftingPreview = { x: currentGridX, y: currentGridY };
       drawDraftingLayer();
@@ -1197,6 +1243,22 @@
       return;
     }
     isPanning = false;
+    if (isBoxTracing && traceBoxStart && traceBoxEnd) {
+      mapStore.traceBoxArea(
+        traceBoxStart.x,
+        traceBoxStart.y,
+        traceBoxEnd.x,
+        traceBoxEnd.y,
+      );
+      isBoxTracing = false;
+      traceBoxStart = null;
+      traceBoxEnd = null;
+      if (traceBoxGfx) {
+        traceBoxGfx.destroy();
+        traceBoxGfx = null;
+      }
+      return;
+    }
     draggedItemId = null;
     lastDragGrid = null;
     if (isBoxSelecting && boxSelectStart && boxSelectEnd) {

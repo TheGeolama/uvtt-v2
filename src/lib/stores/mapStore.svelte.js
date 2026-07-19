@@ -199,8 +199,7 @@ class MapStore {
     selectedItemIds = $state([]);
     clipboard = $state([]);
     lightingPreview = $state(false);
-    wandMode = $state(false);       // <--- ADD THIS
-    wandTolerance = $state(15);     // <--- ADD THIS
+    boxTraceMode = $state(false);
     activeTool = $state("select");
     draftingMode = $state("straight"); 
     audioBlobs = $state({}); 
@@ -1513,20 +1512,22 @@ class MapStore {
             alert("Auto-Trace requires the premium Wails Desktop standalone runtime environment.");
         }
     }
-    // --- MAGIC WAND SEED TRACE ---
-    async traceWandFromSeed(exactX, exactY) {
+
+// --- SMART BOX CENTERLINE TRACE ---
+    async traceBoxArea(exactX1, exactY1, exactX2, exactY2) {
         if (!this.activeMap || !this.activeMap.imageUrl) return;
 
-        // Convert canvas grid coordinates back to raw image pixels for the Go backend
         const manifest = this.activeMap.manifest;
         const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
         const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
         const ppg = Number(manifest.resolution?.pixels_per_grid) || 70;
 
-        const seedPixelX = Math.floor((exactX - originX) * ppg);
-        const seedPixelY = Math.floor((exactY - originY) * ppg);
+        const pX1 = Math.floor((exactX1 - originX) * ppg);
+        const pY1 = Math.floor((exactY1 - originY) * ppg);
+        const pX2 = Math.floor((exactX2 - originX) * ppg);
+        const pY2 = Math.floor((exactY2 - originY) * ppg);
 
-        if (window.go && window.go.main && window.go.main.App && window.go.main.App.TraceWand) {
+        if (window.go && window.go.main && window.go.main.App && window.go.main.App.TraceBoxCenterline) {
             try {
                 let payload = this.activeMap.imageUrl;
                 if (payload.startsWith('blob:') || payload.startsWith('http')) {
@@ -1539,9 +1540,8 @@ class MapStore {
                     });
                 }
 
-                // Call Go Flood Fill Trace
-                const toleranceFloat = this.wandTolerance / 100.0;
-                const polylinePaths = await window.go.main.App.TraceWand(payload, seedPixelX, seedPixelY, toleranceFloat, ppg);
+                // Call Go Centerline Kernel
+                const polylinePaths = await window.go.main.App.TraceBoxCenterline(payload, pX1, pY1, pX2, pY2, ppg);
 
                 if (polylinePaths && polylinePaths.length > 0) {
                     if (!this.activeMap.manifest.geometry.walls) this.activeMap.manifest.geometry.walls = [];
@@ -1553,15 +1553,15 @@ class MapStore {
                             properties: JSON.parse(JSON.stringify(this.defaultSettings.wall.properties))
                         });
                     });
-                    this.pushHistory("Magic Wand Trace");
+                    this.pushHistory("Box Centerline Trace");
                     this.updateSpatialIndex();
                     this.updateTrigger++;
                 }
             } catch (err) {
-                console.error("Wand trace failed:", err);
+                console.error("Box trace failed:", err);
             }
         }
-    }    
+    }
 }
 
 export const mapStore = new MapStore();
