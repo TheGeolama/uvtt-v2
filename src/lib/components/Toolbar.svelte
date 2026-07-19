@@ -888,9 +888,11 @@
                 class="helper-text"
                 style="margin-bottom: 12px; font-size: 12px; line-height: 1.4;"
               >
-                <strong>Auto-Alignment:</strong> Drag green bounding boxes over the
-                1x1 grid squares in the image. We will average them to find the true
-                fractional scale.
+                <strong>1. Pin Origin:</strong> Click on the top-left
+                intersection of a map square to lock the origin.<br /><br />
+                <strong>2. Scale:</strong> Adjust the DPI inputs above to
+                stretch the grid away from your pin.<br /><br />
+                <strong>Or Auto-Align:</strong> Drag green boxes over 1x1 map squares.
               </p>
 
               <div style="display: flex; flex-direction: column; gap: 8px;">

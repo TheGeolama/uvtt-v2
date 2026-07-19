@@ -247,6 +247,26 @@
     const mapWidth = res.map_size[0] * gridX;
     const mapHeight = res.map_size[1] * gridY;
 
+    // HIGH-VISIBILITY PINNED ORIGIN MARKER
+    if (activeTool === "grid_align") {
+      const originMark = new PIXI.Graphics();
+      gridContainer.addChild(originMark);
+
+      // Absolute (0,0) on the grid Container is the top-left pin point
+      originMark
+        .circle(0, 0, 5)
+        .fill({ color: 0xef4444, alpha: 1 })
+        .stroke({ width: 2, color: 0xffffff, alpha: 1 });
+      originMark
+        .moveTo(-20, 0)
+        .lineTo(20, 0)
+        .stroke({ width: 2, color: 0xef4444, alpha: 0.8 });
+      originMark
+        .moveTo(0, -20)
+        .lineTo(0, 20)
+        .stroke({ width: 2, color: 0xef4444, alpha: 0.8 });
+    }
+
     const subGridGfx = new PIXI.Graphics();
     gridContainer.addChild(subGridGfx);
     const subGridSizeX = gridX / unitsPerGrid;
@@ -1360,12 +1380,12 @@
     draggedItemId = null;
     lastDragGrid = null;
 
-    // --- COMMIT GRID ALIGNMENT BOX ---
+    // --- COMMIT GRID ALIGNMENT BOX OR CLICK ---
     if (isGridAligning && alignBoxStart && alignBoxEnd) {
-      if (
-        Math.abs(alignBoxEnd.x - alignBoxStart.x) > 5 &&
-        Math.abs(alignBoxEnd.y - alignBoxStart.y) > 5
-      ) {
+      const w = Math.abs(alignBoxEnd.x - alignBoxStart.x);
+      const h = Math.abs(alignBoxEnd.y - alignBoxStart.y);
+
+      if (w > 5 && h > 5) {
         mapStore.gridAlignBoxes.push({
           sx: alignBoxStart.x,
           sy: alignBoxStart.y,
@@ -1373,7 +1393,11 @@
           ey: alignBoxEnd.y,
         });
         mapStore.updateTrigger++;
+      } else {
+        // It was a pure click — lock the origin to this exact coordinate!
+        mapStore.setGridOrigin(alignBoxStart.x, alignBoxStart.y);
       }
+
       isGridAligning = false;
       alignBoxStart = null;
       alignBoxEnd = null;

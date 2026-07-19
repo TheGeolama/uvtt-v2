@@ -253,6 +253,18 @@ class MapStore {
     get redrawTick() { return this.updateTrigger; }
 
     // --- GRID ALIGNMENT CONTROLLER ---
+    setGridOrigin(imagePixelX, imagePixelY) {
+        if (!this.activeMap) return;
+        const res = this.activeMap.manifest.resolution;
+        
+        // Pin the absolute (0,0) coordinate of the grid to this exact pixel on the image
+        res.map_offset_x = -imagePixelX;
+        res.map_offset_y = -imagePixelY;
+        
+        this.pushHistory("Pinned Grid Origin");
+        this.updateTrigger++;
+    }
+
     calculateGridAlignment() {
         if (!this.activeMap || this.gridAlignBoxes.length === 0) return;
         const boxes = this.gridAlignBoxes;
@@ -281,25 +293,24 @@ class MapStore {
         
         const anchorX = Math.min(boxes[0].sx, boxes[0].ex);
         const anchorY = Math.min(boxes[0].sy, boxes[0].ey);
-
-        const modX = ((anchorX % newPpgX) + newPpgX) % newPpgX;
-        const modY = ((anchorY % newPpgY) + newPpgY) % newPpgY;
         
         const res = this.activeMap.manifest.resolution;
         const oldPpgX = Number(res.pixels_per_grid) || 70;
         const oldPpgY = Number(res.pixels_per_grid_y) || oldPpgX;
         
-        // Preserve absolute pixel dimensions
+        // Preserve absolute pixel dimensions of the image canvas
         const pixelWidth = res.map_size[0] * oldPpgX;
         const pixelHeight = res.map_size[1] * oldPpgY;
         
         res.pixels_per_grid = newPpgX;
-        res.pixels_per_grid_y = newPpgY; // Non-square grid tracking
+        res.pixels_per_grid_y = newPpgY; 
+        
         res.map_size[0] = pixelWidth / newPpgX;
         res.map_size[1] = pixelHeight / newPpgY;
         
-        res.map_offset_x = -modX;
-        res.map_offset_y = -modY;
+        // Lock the origin exactly to the top-left corner of the first box drawn
+        res.map_offset_x = -anchorX;
+        res.map_offset_y = -anchorY;
 
         this.gridAlignBoxes = [];
         this.setTool('select');
