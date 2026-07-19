@@ -1513,7 +1513,7 @@ class MapStore {
         }
     }
 
-// --- SMART BOX CENTERLINE TRACE ---
+    // --- SMART BOX CENTERLINE TRACE ---
     async traceBoxArea(exactX1, exactY1, exactX2, exactY2) {
         if (!this.activeMap || !this.activeMap.imageUrl) return;
 
@@ -1556,10 +1556,15 @@ class MapStore {
                     this.pushHistory("Box Centerline Trace");
                     this.updateSpatialIndex();
                     this.updateTrigger++;
+                } else {
+                    alert("No distinct wall mass found in that box. Try drawing the box slightly wider so it captures the background floor for contrast!");
                 }
             } catch (err) {
                 console.error("Box trace failed:", err);
+                alert("The Go backend failed to process the image.");
             }
+        } else {
+            alert("Backend function not found! You must restart 'wails dev' so the Go bindings regenerate.");
         }
     }
 }
