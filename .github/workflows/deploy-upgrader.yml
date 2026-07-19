@@ -2,8 +2,10 @@ name: Build uvtt-v2-upgrader
 
 on:
   push:
+    branches:
+      - main # <-- Add this to trigger on regular pushes to main
     tags:
-      - "v*" # Automatically run when you push a version tag (e.g., v1.0.0)
+      - "v*"
   workflow_dispatch: # Gives you a manual "Run workflow" button in GitHub UI
 
 env:
