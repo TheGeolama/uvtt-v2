@@ -875,6 +875,71 @@
                 >
                   🤖 SMART GEOMETRY COMPUTER VISION
                 </span>
+                <!-- MAGIC WAND TOGGLE -->
+                <label
+                  class="checkbox-row"
+                  style="margin-top: 5px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed rgba(0, 240, 255, 0.2);"
+                >
+                  <input type="checkbox" bind:checked={mapStore.wandMode} />
+                  <span style="color: #e2e8f0;"
+                    >🪄 Magic Wand Click-Trace Mode</span
+                  >
+                </label>
+
+                {#if mapStore.wandMode}
+                  <p
+                    class="helper-text"
+                    style="color: #22c55e; margin-bottom: 10px;"
+                  >
+                    Click directly on a wall in the canvas to auto-trace its
+                    connected structure.
+                  </p>
+                  <label>
+                    <span>Color Flood Tolerance:</span>
+                    <div class="slider-row">
+                      <input
+                        type="range"
+                        min="1"
+                        max="50"
+                        step="1"
+                        bind:value={mapStore.wandTolerance}
+                      />
+                      <span
+                        style="font-family: monospace; font-size: 11px; width: 30px; text-align: right; color: #fff;"
+                        >{mapStore.wandTolerance}%</span
+                      >
+                    </div>
+                  </label>
+                {:else}
+                  <label style="margin-top: 8px;">
+                    <span>Global Edge Trace Sensitivity:</span>
+                    <div class="slider-row">
+                      <input
+                        type="range"
+                        min="0.05"
+                        max="0.95"
+                        step="0.05"
+                        bind:value={edgeSensitivity}
+                      />
+                      <span
+                        style="font-family: monospace; font-size: 11px; width: 30px; text-align: right; color: #fff;"
+                        >{Math.round(edgeSensitivity * 100)}%</span
+                      >
+                    </div>
+                  </label>
+                  <button
+                    class="action-btn wave"
+                    style="margin-top: 10px; width: 100%; justify-content: center; font-weight: bold;"
+                    onclick={handleAutoTraceWalls}
+                    disabled={isCrunchingWalls}
+                  >
+                    {#if isCrunchingWalls}
+                      <span>⏳ Crunching Pixels...</span>
+                    {:else}
+                      <span>🪄 Auto-Trace Entire Canvas</span>
+                    {/if}
+                  </button>
+                {/if}
                 <label style="margin-top: 8px;">
                   <span>Edge Trace Sensitivity:</span>
                   <div class="slider-row">

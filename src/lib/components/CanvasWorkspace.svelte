@@ -1000,6 +1000,13 @@
         e.shiftKey,
         currentToolAction,
       );
+
+      // --- MAGIC WAND INTERCEPT ---
+      if (currentToolAction === "wall" && mapStore.wandMode) {
+        mapStore.traceWandFromSeed(coords.exactX, coords.exactY);
+        return; // Skip normal drafting entirely
+      }
+
       currentGridX = coords.snapX;
       currentGridY = coords.snapY;
 
