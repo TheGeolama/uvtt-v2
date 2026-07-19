@@ -226,6 +226,7 @@
       !shadowContainer
     )
       return;
+
     gridContainer.removeChildren().forEach((c) => c.destroy());
     geometryContainer.removeChildren().forEach((c) => c.destroy());
     entitiesContainer.removeChildren().forEach((c) => c.destroy());
@@ -415,6 +416,7 @@
       const isHidden = roof.properties?.hidden || false;
       const renderOpacity = isHidden ? opacity * 0.5 : opacity;
       const strokeColor = isHidden ? 0xef4444 : tint;
+
       if (selectedIds.has(roof.id)) {
         tracePath(gfx, roof.path, gridSize, originX, originY, true);
         gfx.stroke({
@@ -425,7 +427,9 @@
           cap: "round",
         });
       }
+
       tracePath(gfx, roof.path, gridSize, originX, originY, true);
+
       if (roof.path && roof.path.length > 2) {
         gfx.fill({ color: tint, alpha: renderOpacity });
         gfx.stroke({
@@ -441,6 +445,7 @@
     (manifest.geometry.walls || []).forEach((wall) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
+
       if (selectedIds.has(wall.id)) {
         tracePath(gfx, wall.path, gridSize, originX, originY);
         gfx.stroke({
@@ -451,6 +456,7 @@
           cap: "round",
         });
       }
+
       tracePath(gfx, wall.path, gridSize, originX, originY);
       gfx.stroke({
         width: 5,
@@ -478,6 +484,7 @@
           cap: "round",
         });
       }
+
       tracePath(gfx, portal.path, gridSize, originX, originY);
       gfx.stroke({
         width: 5,
@@ -505,13 +512,16 @@
 
   function drawBoxSelection() {
     if (!geometryContainer || !activeMap) return;
+
     if (boxSelectGfx) {
       boxSelectGfx.destroy();
       boxSelectGfx = null;
     }
+
     if (isBoxSelecting && boxSelectStart && boxSelectEnd) {
       boxSelectGfx = new PIXI.Graphics();
       geometryContainer.addChild(boxSelectGfx);
+
       const res = activeMap.manifest.resolution;
       const gridSize = Number(res.pixels_per_grid) || 70;
       const originX = Number(res.map_origin[0]) || 0;
@@ -520,6 +530,7 @@
       const sy = (boxSelectStart.y - originY) * gridSize;
       const ex = (boxSelectEnd.x - originX) * gridSize;
       const ey = (boxSelectEnd.y - originY) * gridSize;
+
       boxSelectGfx.rect(
         Math.min(sx, ex),
         Math.min(sy, ey),
@@ -533,6 +544,7 @@
 
   function drawGridAlignBoxes() {
     if (!geometryContainer || !activeMap) return;
+
     if (alignBoxGfx) {
       alignBoxGfx.destroy();
       alignBoxGfx = null;
@@ -580,17 +592,21 @@
 
   function drawDraftingLayer() {
     if (!geometryContainer || !activeMap) return;
+
     if (draftingLayerGfx) {
       draftingLayerGfx.destroy();
       draftingLayerGfx = null;
     }
+
     if (draftingPath.length > 0) {
       draftingLayerGfx = new PIXI.Graphics();
       geometryContainer.addChild(draftingLayerGfx);
+
       const res = activeMap.manifest.resolution;
       const gridSize = Number(res.pixels_per_grid) || 70;
       const originX = Number(res.map_origin[0]) || 0;
       const originY = Number(res.map_origin[1]) || 0;
+
       const pts = draftingPreview
         ? [...draftingPath, draftingPreview]
         : [...draftingPath];
@@ -600,6 +616,7 @@
           : activeTool === "roof"
             ? 0x22c55e
             : 0xffa500;
+
       tracePath(
         draftingLayerGfx,
         pts,
@@ -615,8 +632,10 @@
         join: "round",
         cap: "round",
       });
-      if (activeTool === "roof" && pts.length > 2)
+
+      if (activeTool === "roof" && pts.length > 2) {
         draftingLayerGfx.fill({ color: dColor, alpha: 0.2 });
+      }
     }
   }
 
@@ -636,6 +655,7 @@
   function getVectorSnapPoint(px, py, walls, snapDistance) {
     let closestDist = snapDistance * snapDistance;
     let snapPoint = null;
+
     for (const wall of walls) {
       if (!wall.path || wall.path.length < 2) continue;
       for (let i = 0; i < wall.path.length - 1; i++) {
@@ -645,6 +665,7 @@
         const y2 = Number(wall.path[i + 1].y);
         const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
         if (l2 === 0) continue;
+
         let t = Math.max(
           0,
           Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2),
@@ -652,6 +673,7 @@
         const projX = x1 + t * (x2 - x1);
         const projY = y1 + t * (y2 - y1);
         const distSq = (px - projX) ** 2 + (py - projY) ** 2;
+
         if (distSq < closestDist) {
           closestDist = distSq;
           snapPoint = { x: projX, y: projY };
@@ -662,8 +684,10 @@
   }
 
   function getGridCoordinates(clientX, clientY, e_shiftKey, currentToolAction) {
-    if (!activeMap)
+    if (!activeMap) {
       return { exactX: 0, exactY: 0, snapX: 0, snapY: 0, gridSize: 70 };
+    }
+
     const rect = canvasContainer.getBoundingClientRect();
     const rawX = clientX - rect.left;
     const rawY = clientY - rect.top;
@@ -676,6 +700,7 @@
     );
     const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
     const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
+
     const exactX = (rawX - panX) / scale / gridSize + originX;
     const exactY = (rawY - panY) / scale / gridSize + originY;
 
@@ -709,6 +734,7 @@
     );
     const isCenterSnapTool = ["spawn", "event"].includes(effectiveAction);
     const shouldSnap = isFreeTool ? e_shiftKey : !e_shiftKey;
+
     if (isCenterSnapTool && shouldSnap) {
       snapX = Math.floor(exactX) + 0.5;
       snapY = Math.floor(exactY) + 0.5;
@@ -740,7 +766,6 @@
   function handleDrop(e) {
     e.preventDefault();
 
-    // 1. Check for physical files dropped from the OS (Windows/Mac)
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
       const ext = file.name.split(".").pop().toLowerCase();
@@ -757,7 +782,6 @@
       }
     }
 
-    // 2. Fallback to existing internal drag-and-drop (Asset Library Props)
     const dataStr = e.dataTransfer.getData("application/json");
     if (!dataStr) return;
 
@@ -839,7 +863,6 @@
         const currentOffY = Number(res.map_offset_y) || 0;
 
         isGridAligning = true;
-        // Record positions relative to the raw image (world position minus current offset)
         alignBoxStart = { x: worldX - currentOffX, y: worldY - currentOffY };
         alignBoxEnd = { x: worldX - currentOffX, y: worldY - currentOffY };
         return;
@@ -869,6 +892,7 @@
         drawDraftingLayer();
         return;
       }
+
       if (
         ["light", "audio", "event", "emitter", "spawn"].includes(
           currentToolAction,
@@ -905,6 +929,7 @@
             }
           }
         };
+
         const checkGeometryCollision = (items) => {
           for (const item of items) {
             const path = item.path || [];
@@ -995,6 +1020,7 @@
       e.shiftKey,
       currentToolAction,
     );
+
     mapStore.mouseX = coords.exactX.toFixed(2);
     mapStore.mouseY = coords.exactY.toFixed(2);
 
@@ -1004,6 +1030,7 @@
       updateViewport();
       return;
     }
+
     if (isDraggingVisionToken) {
       mapStore.updateVisionToken(coords.exactX, coords.exactY);
       return;
@@ -1028,11 +1055,13 @@
 
     currentGridX = coords.snapX;
     currentGridY = coords.snapY;
+
     if (isBoxSelecting) {
       boxSelectEnd = { x: coords.exactX, y: coords.exactY };
       drawBoxSelection();
       return;
     }
+
     if (["wall", "portal", "roof"].includes(currentToolAction)) {
       draftingPreview = { x: currentGridX, y: currentGridY };
       drawDraftingLayer();
@@ -1040,6 +1069,7 @@
       draftingPreview = null;
       drawDraftingLayer();
     }
+
     if (draggedItemId && currentToolAction === "select" && lastDragGrid) {
       const dx = currentGridX - lastDragGrid.x;
       const dy = currentGridY - lastDragGrid.y;
@@ -1059,6 +1089,7 @@
       isDraggingVisionToken = false;
       return;
     }
+
     isPanning = false;
     draggedItemId = null;
     lastDragGrid = null;
@@ -1075,7 +1106,7 @@
           ex: alignBoxEnd.x,
           ey: alignBoxEnd.y,
         });
-        mapStore.updateTrigger++; // Force Svelte to react to the new array item
+        mapStore.updateTrigger++;
       }
       isGridAligning = false;
       alignBoxStart = null;
@@ -1091,12 +1122,15 @@
       const maxY = Math.max(boxSelectStart.y, boxSelectEnd.y);
       const manifest = activeMap.manifest;
       const hits = [];
+
       const inBox = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
+
       const checkEntities = (items, getPos) =>
         items.forEach((item) => {
           const p = getPos(item);
           if (p && inBox(p.x, p.y)) hits.push(item.id);
         });
+
       const checkGeometries = (items) =>
         items.forEach((item) => {
           if (
@@ -1105,6 +1139,7 @@
           )
             hits.push(item.id);
         });
+
       checkEntities(manifest.entities?.lights || [], (i) => ({
         x: Number(i.position?.x),
         y: Number(i.position?.y),
@@ -1132,7 +1167,9 @@
       checkGeometries(manifest.geometry?.walls || []);
       checkGeometries(manifest.geometry?.portals || []);
       checkGeometries(manifest.geometry?.overhead || []);
+
       if (hits.length > 0) mapStore.selectItems(hits, true);
+
       isBoxSelecting = false;
       boxSelectStart = null;
       boxSelectEnd = null;
@@ -1150,40 +1187,49 @@
     const pointerY = e.clientY - rect.top;
     const zoom = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = scale * zoom;
+
     panX = pointerX - (pointerX - panX) * (newScale / scale);
     panY = pointerY - (pointerY - panY) * (newScale / scale);
     scale = newScale;
+
     mapStore.zoomScale = Math.round(scale * 100);
     updateViewport();
   }
 
   function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
     if (e.code === "Space") {
       e.preventDefault();
       isSpacePressed = true;
       return;
     }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
       e.shiftKey ? mapStore.redo() : mapStore.undo();
       return;
     }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
       e.preventDefault();
       mapStore.redo();
       return;
     }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       mapStore.copySelected();
     }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
       mapStore.pasteClipboard(currentGridX, currentGridY);
     }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
       e.preventDefault();
       mapStore.duplicateSelected();
     }
+
     if (e.key === "Escape") {
       if (isGridAligning || mapStore.gridAlignBoxes.length > 0) {
         isGridAligning = false;
@@ -1206,15 +1252,21 @@
         draftingPath = [];
         draftingPreview = null;
         drawDraftingLayer();
-      } else mapStore.clearSelection();
+      } else {
+        mapStore.clearSelection();
+      }
     }
+
     if (e.key === "Enter" && draftingPath.length > 1) {
       mapStore.addGeometry(activeTool, [...draftingPath]);
       draftingPath = [];
       draftingPreview = null;
       drawDraftingLayer();
     }
-    if (e.key === "Delete" || e.key === "Backspace") mapStore.deleteSelected();
+
+    if (e.key === "Delete" || e.key === "Backspace") {
+      mapStore.deleteSelected();
+    }
   }
 
   function handleKeyUp(e) {
@@ -1265,10 +1317,11 @@
   .pixi-workspace.is-panning {
     cursor: grabbing !important;
   }
-  /* Custom inline SVG cursor for a razor-thin, 30% opacity white crosshair */
+
+  /* Custom CAD drafting cursor: 1px white line with 1px black outline */
   .pixi-workspace.grid-align-mode {
     cursor:
-      url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48bGluZSB4MT0iMTYiIHkxPSIwIiB4Mj0iMTYiIHkyPSIzMiIgc3Ryb2tlPSJyZ2JhKDI1NSwyNTUsMjU1LDAuMykiIHN0cm9rZS13aWR0aD0iMSIvPjxsaW5lIHgxPSIwIiB5MT0iMTYiIHgyPSIzMiIgeTI9IjE2IiBzdHJva2U9InJnYmEoMjU1LDI1NSwyNTUsMC4zKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9zdmc+")
+      url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48bGluZSB4MT0iMTYiIHkxPSIwIiB4Mj0iMTYiIHkyPSIzMiIgc3Ryb2tlPSJyZ2JhKDAsMCwwLDAuNikiIHN0cm9rZS13aWR0aD0iMyIvPjxsaW5lIHgxPSIwIiB5MT0iMTYiIHgyPSIzMiIgeTI9IjE2IiBzdHJva2U9InJnYmEoMCwwLDAsMC42KSIgc3Ryb2tlLXdpZHRoPSIzIi8+PGxpbmUgeDE9IjE2IiB5MT0iMCIgeDI9IjE2IiB5Mj0iMzIiIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIxIi8+PGxpbmUgeDE9IjAiIHkxPSIxNiIgeDI9IjMyIiB5Mj0iMTYiIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9zdmc+")
         16 16,
       crosshair;
   }
