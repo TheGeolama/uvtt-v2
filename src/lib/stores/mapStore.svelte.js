@@ -127,7 +127,6 @@ function verifyAndCleanManifest(rawManifest) {
             m.geometry[cat] = m.geometry[cat].filter(item => {
                 if (!item.path || !Array.isArray(item.path) || item.path.length < 2) return false;
                 if (!item.properties) item.properties = {};
-                // Inject the 3D UVTT v2 Schema Bounds if missing
                 if (!isNum(item.properties.bottom)) item.properties.bottom = (cat === 'overhead' ? 10.0 : 0.0);
                 if (!isNum(item.properties.top)) item.properties.top = (cat === 'overhead' ? 20.0 : 10.0);
                 return item.path.every(pt => isNum(pt.x) && isNum(pt.y));
@@ -136,6 +135,7 @@ function verifyAndCleanManifest(rawManifest) {
     });
 
     if (m.entities) {
+        if (!m.entities.props) m.entities.props = [];
         if (m.entities.lights) {
             m.entities.lights = m.entities.lights.filter(l => {
                 if (!l.position || !isNum(l.position.x) || !isNum(l.position.y)) return false;
@@ -174,6 +174,12 @@ function verifyAndCleanManifest(rawManifest) {
                 if (!em.position || !isNum(em.position.x) || !isNum(em.position.y)) return false;
                 if (!isNum(em.scale)) em.scale = 100;
                 return true;
+			});
+        }
+        if (m.entities.props) {
+            m.entities.props = m.entities.props.filter(pr => {
+                if (!pr.position || !isNum(pr.position.x) || !isNum(pr.position.y)) return false;
+                return true;
             });
         }
     }
@@ -198,12 +204,20 @@ class MapStore {
     audioBlobs = $state({}); 
     quadtree = $state(null);
     
+    // --- CAD STATUS BAR METRICS ---
+    mouseX = $state(0.00);
+    mouseY = $state(0.00);
+    zoomScale = $state(100);
+
     // --- VISION CONTROLLER STATE ---
     vision = $state({
         enabled: false,
         token: { x: 0, y: 0, radius: 5 },
         showFov: true
     });
+
+    // --- GLOBAL ASSET LIBRARY ---
+    globalAssets = $state({ images: [], audio: [] });
 
     _saveTimeout = null;
 
@@ -216,7 +230,9 @@ class MapStore {
         spawn: { name: 'New Spawn', shape: 'circle', is_default: false, heading_degrees: 0.0 },
         event: { name: 'New Event', eventType: 'Trap/Door Trigger', activation: 'proximity', trigger_bounds: { radius: 0.5 }, targetSpawnId: "", autoCreateMatch: false, targetFloorId: "" },
         audio: { track: "", volume: 100, radius: 5, inner_radius: 2.5, muffledByWalls: true },
-        emitter: { type: 'weather', style: 'rain', isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100, direction: 180, speed: 50, intensity: 50, variance: 10, graphic: '', position: { z: 0 } }
+        emitter: { type: 'weather', style: 'rain', isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100, direction: 180, speed: 50, intensity: 50, variance: 10, graphic: '', position: { z: 0 } },
+        prop: { scale: 100, rotation: 0, position: { z: 0 } },
+        asset: {} 
     });
 
     constructor() {
@@ -261,6 +277,7 @@ class MapStore {
         indexEntity(m.entities?.events, i => ({x: i.trigger_bounds.center.x, y: i.trigger_bounds.center.y}));
         indexEntity(m.entities?.audio?.zones, i => ({x: i.center.x, y: i.center.y}));
         indexEntity(m.entities?.emitters, i => ({x: i.position.x, y: i.position.y}));
+        indexEntity(m.entities?.props, i => ({x: i.position.x, y: i.position.y}));
     }
 
     // --- IO & PERSISTENCE ---
@@ -345,6 +362,7 @@ class MapStore {
                     return ev;
                 });
             }
+            delete cleanManifest.entities.props;
         }
         this.downloadJSON(`${this.activeMap.filename || 'export'}_v1_legacy.uvtt`, cleanManifest);
     }
@@ -389,6 +407,7 @@ class MapStore {
                         return ev;
                     });
                 }
+                delete levelManifest.entities.props;
             }
             compoundManifest.levels.push(levelManifest);
         });
@@ -670,7 +689,7 @@ class MapStore {
             manifest: {
                 resolution: { pixels_per_grid: 70, grid_line_width: 1.5, subgrid_line_width: 1.0 },
                 geometry: { walls: [], portals: [], overhead: [] },
-                entities: { lights: [], landing_zones: [], events: [], emitters: [], audio: { zones: [] } }
+                entities: { lights: [], landing_zones: [], events: [], emitters: [], audio: { zones: [] }, props: [] }
             },
             imageUrl: "",
             history: [],
@@ -1120,7 +1139,7 @@ class MapStore {
             }
         }
         if (!foundItem) {
-            for (const cat of ['lights', 'landing_zones', 'events', 'emitters']) {
+            for (const cat of ['lights', 'landing_zones', 'events', 'emitters', 'props']) {
                 if (m.entities[cat]) {
                     foundItem = m.entities[cat].find(i => i.id === id);
                     if (foundItem) break;
@@ -1170,6 +1189,9 @@ class MapStore {
         const em = m.entities.emitters?.find(i => i.id === id);
         if (em && em.position) { em.position.x = exactX; em.position.y = exactY; }
 
+        const prop = m.entities.props?.find(i => i.id === id);
+        if (prop && prop.position) { prop.position.x = exactX; prop.position.y = exactY; }
+
         this.pushHistory("Moved Item");
         this.updateSpatialIndex();
     }
@@ -1185,7 +1207,7 @@ class MapStore {
                     item.path.forEach(pt => { pt.x += dx; pt.y += dy; });
                 }
             });
-            ['lights', 'landing_zones', 'events', 'emitters'].forEach(cat => {
+            ['lights', 'landing_zones', 'events', 'emitters', 'props'].forEach(cat => {
                 const item = m.entities[cat]?.find(i => i.id === id);
                 if (item) {
                     if (item.position) { item.position.x += dx; item.position.y += dy; }
@@ -1224,6 +1246,7 @@ class MapStore {
             removeById(m.entities.landing_zones);
             removeById(m.entities.events);
             removeById(m.entities.emitters);
+            removeById(m.entities.props);
             if (m.entities.audio) {
                 removeById(m.entities.audio.zones);
             }
@@ -1283,7 +1306,7 @@ class MapStore {
                 const item = m.geometry[cat]?.find(i => i.id === id);
                 if (item) this.clipboard.push({ category: cat, data: JSON.parse(JSON.stringify(item)), group: 'geometry' });
             });
-            ['lights', 'landing_zones', 'events', 'emitters'].forEach(cat => {
+            ['lights', 'landing_zones', 'events', 'emitters', 'props'].forEach(cat => {
                 const item = m.entities[cat]?.find(i => i.id === id);
                 if (item) this.clipboard.push({ category: cat, data: JSON.parse(JSON.stringify(item)), group: 'entities' });
             });
@@ -1328,6 +1351,104 @@ class MapStore {
     duplicateSelected() {
         this.copySelected();
         this.pasteClipboard(0, 0);
+    }
+
+    // --- GLOBAL ASSET LIBRARY BRIDGE ---
+    async mountAssetLibrary() {
+        if (window.go && window.go.main && window.go.main.App && window.go.main.App.SelectAssetDirectory) {
+            try {
+                const assets = await window.go.main.App.SelectAssetDirectory();
+                if (assets && assets.length > 0) {
+                    const images = assets.filter(a => a.type === 'image');
+                    const audio = assets.filter(a => a.type === 'audio');
+                    this.globalAssets = { images, audio };
+
+                    const audioPromises = audio.map(async (a) => {
+                        try {
+                            const res = await fetch(a.data);
+                            const blob = await res.blob();
+                            this.audioBlobs[a.name] = blob;
+                        } catch (e) {
+                            console.error(`Failed to fetch local audio: ${a.name}`);
+                        }
+                    });
+                    
+                    await Promise.all(audioPromises);
+                    this.updateTrigger++;
+                }
+            } catch (err) {
+                console.error("Failed to load asset directory:", err);
+            }
+        } else {
+            alert("Asset Library requires the native Wails Desktop build running.");
+        }
+    }
+
+    addProp(x, y, imageURL, name) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.prop;
+        const prop = {
+            id: crypto.randomUUID(),
+            name: name,
+            image: imageURL,
+            position: { x, y, z: ds.position.z },
+            rotation: ds.rotation,
+            scale: ds.scale
+        };
+        if (!activeMap.manifest.entities.props) activeMap.manifest.entities.props = [];
+        activeMap.manifest.entities.props.push(prop);
+        this.pushHistory("Added Prop Asset");
+        this.updateSpatialIndex();
+        this.updateTrigger++;
+    }
+
+    // --- 🤖 PRO EXCLUSIVE SMART GEOMETRY AUTO-WALLS ---
+    async autoTraceMapWalls(sensitivityThreshold) {
+        if (!this.activeMap || !this.activeMap.imageUrl) {
+            alert("No map background image loaded to trace.");
+            return;
+        }
+
+        if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoTraceWalls) {
+            try {
+                const pixelsPerGrid = parseFloat(this.activeMap.manifest.resolution?.pixels_per_grid) || 70.0;
+                
+                // Invoke Go compute kernel
+                const polylinePaths = await window.go.main.App.AutoTraceWalls(
+                    this.activeMap.imageUrl, 
+                    parseFloat(sensitivityThreshold), 
+                    pixelsPerGrid
+                );
+
+                if (polylinePaths && polylinePaths.length > 0) {
+                    if (!this.activeMap.manifest.geometry.walls) {
+                        this.activeMap.manifest.geometry.walls = [];
+                    }
+
+                    polylinePaths.forEach(path => {
+                        const id = crypto.randomUUID();
+                        this.activeMap.manifest.geometry.walls.push({
+                            id: id,
+                            path: path,
+                            isBezier: false,
+                            properties: JSON.parse(JSON.stringify(this.defaultSettings.wall.properties))
+                        });
+                    });
+
+                    this.pushHistory("Auto-Traced Structural Walls");
+                    this.updateSpatialIndex();
+                    this.updateTrigger++;
+                } else {
+                    alert("No walls detected. Try increasing the Edge Sensitivity slider.");
+                }
+            } catch (err) {
+                console.error("Native auto-trace crunching error:", err);
+                alert("Auto-wall tracing operation failed on the backend kernel.");
+            }
+        } else {
+            alert("Auto-Trace requires the premium Wails Desktop standalone runtime environment.");
+        }
     }
 }
 

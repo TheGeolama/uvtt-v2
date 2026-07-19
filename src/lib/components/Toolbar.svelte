@@ -8,7 +8,59 @@
   let catalog = $derived(mapStore.catalog);
   let activeTool = $derived(mapStore.activeTool);
   let lightingPreview = $derived(mapStore.lightingPreview);
+  let visionEnabled = $derived(mapStore.vision?.enabled);
   let manifest = $derived(activeMap?.manifest);
+
+  // --- DESKTOP PRO CAPABILITY CHECK ---
+  // Safely checks if the engine is running inside the Wails/Go wrapper
+  let isDesktopPro = $derived(
+    typeof window !== "undefined" && !!window?.go?.main,
+  );
+
+  // --- LOCAL SMART GEOMETRY STATE ---
+  let edgeSensitivity = $state(0.45);
+  let isCrunchingWalls = $state(false);
+
+  async function handleAutoTraceWalls() {
+    if (isCrunchingWalls) return;
+    isCrunchingWalls = true;
+    try {
+      await mapStore.autoTraceMapWalls(edgeSensitivity);
+    } finally {
+      isCrunchingWalls = false;
+    }
+  }
+
+  // --- CAD STATUS BAR METRICS ---
+  let mouseX = $derived(mapStore.mouseX);
+  let mouseY = $derived(mapStore.mouseY);
+  let zoomScale = $derived(mapStore.zoomScale);
+
+  // Context-Aware Hotkey Routing
+  let hotkeyHint = $derived.by(() => {
+    if (visionEnabled) {
+      return "<span class='key'>Left-Click & Drag:</span> Move Vision Token <span class='sep'>|</span> <span class='key'>Space+Drag:</span> Pan Camera";
+    }
+
+    switch (activeTool) {
+      case "wall":
+      case "portal":
+      case "roof":
+        return "<span class='key'>Left-Click:</span> Draw Node <span class='sep'>|</span> <span class='key'>Shift:</span> Bypass Snap <span class='sep'>|</span> <span class='key'>Ctrl-Click:</span> Select <span class='sep'>|</span> <span class='key'>Alt+Right-Click:</span> Delete Node <span class='sep'>|</span> <span class='key'>Enter/Right-Click:</span> Finish";
+      case "select":
+        return "<span class='key'>Left-Click:</span> Select <span class='sep'>|</span> <span class='key'>Shift:</span> Multi-Select <span class='sep'>|</span> <span class='key'>Ctrl+C/V:</span> Copy/Paste <span class='sep'>|</span> <span class='key'>Ctrl+D:</span> Clone <span class='sep'>|</span> <span class='key'>Alt+Click:</span> Split Vector";
+      case "spawn":
+      case "light":
+      case "audio":
+      case "emitter":
+      case "event":
+        return "<span class='key'>Left-Click:</span> Place Entity <span class='sep'>|</span> <span class='key'>Shift:</span> Free Placement <span class='sep'>|</span> <span class='key'>Ctrl-Click:</span> Select";
+      case "asset":
+        return "<span class='key'>Drag & Drop:</span> Place Prop on Canvas <span class='sep'>|</span> Desktop Local I/O Bypasses Browser Restrictions";
+      default:
+        return "<span class='key'>Space+Drag:</span> Pan Camera <span class='sep'>|</span> <span class='key'>Scroll:</span> Zoom <span class='sep'>|</span> <span class='key'>Ctrl+Z/Y:</span> Undo/Redo";
+    }
+  });
 
   let packageCompound = $state(false);
 
@@ -40,6 +92,9 @@
         item = manifest?.entities?.landing_zones?.find((lz) => lz.id === id);
         if (item) return { ...item, category: "spawn" };
 
+        item = manifest?.entities?.props?.find((pr) => pr.id === id);
+        if (item) return { ...item, category: "prop" };
+
         return null;
       })
       .filter(Boolean),
@@ -65,6 +120,16 @@
       });
     } else {
       mapStore.updateDefaultSetting(category, keyPath, value);
+    }
+  }
+
+  async function handleAutoTraceWalls() {
+    if (isCrunchingWalls) return;
+    isCrunchingWalls = true;
+    try {
+      await mapStore.autoTraceMapWalls(edgeSensitivity);
+    } finally {
+      isCrunchingWalls = false;
     }
   }
 
@@ -143,6 +208,7 @@
 </script>
 
 {#if activeMap}
+  <!-- Always-Visible Level Navigation Bar (Top Center) -->
   <div class="level-nav-bar">
     <div class="level-controls">
       <span class="icon" title="Compound Dungeon">🌍</span>
@@ -165,27 +231,34 @@
 
       <div class="divider"></div>
 
+      <!-- UNDO / REDO BUTTONS -->
       <button
         class="icon-btn"
         disabled={!activeMap.history || activeMap.historyIndex <= 0}
         onclick={() => mapStore.undo()}
-        title="Undo (Ctrl+Z)">↶</button
+        title="Undo (Ctrl+Z)"
       >
+        ↶
+      </button>
       <button
         class="icon-btn"
         disabled={!activeMap.history ||
           activeMap.historyIndex >= activeMap.history.length - 1}
         onclick={() => mapStore.redo()}
-        title="Redo (Ctrl+Y)">↷</button
+        title="Redo (Ctrl+Y)"
       >
+        ↷
+      </button>
 
       <div class="divider"></div>
 
       <button
         class="icon-btn positive"
         onclick={() => mapStore.addMapLevel()}
-        title="Add Blank Level">➕</button
+        title="Add Blank Level"
       >
+        ➕
+      </button>
       <label
         class="icon-btn wave import-btn"
         title="Import Legacy Floor (.dd2vtt)"
@@ -204,8 +277,10 @@
           if (confirm("Delete this level forever?"))
             mapStore.deleteMapLevel(activeMap.id);
         }}
-        title="Delete Level">🗑️</button
+        title="Delete Level"
       >
+        🗑️
+      </button>
     </div>
   </div>
 
@@ -216,23 +291,31 @@
         <button
           class:active={activeTool === "select"}
           onclick={() => selectTool("select")}
-          aria-label="Selection Tool"><span>🔍</span> Select</button
+          aria-label="Selection Tool"
         >
+          <span>🔍</span> Select
+        </button>
         <button
           class:active={activeTool === "wall"}
           onclick={() => selectTool("wall")}
-          aria-label="Draw Walls"><span>🧱</span> Wall</button
+          aria-label="Draw Walls"
         >
+          <span>🧱</span> Wall
+        </button>
         <button
           class:active={activeTool === "portal"}
           onclick={() => selectTool("portal")}
-          aria-label="Draw Portals"><span>🚪</span> Portal</button
+          aria-label="Draw Portals"
         >
+          <span>🚪</span> Portal
+        </button>
         <button
           class:active={activeTool === "roof"}
           onclick={() => selectTool("roof")}
-          aria-label="Draw Roofs"><span>🌳</span> Roof</button
+          aria-label="Draw Roofs"
         >
+          <span>🌳</span> Roof
+        </button>
       </div>
 
       <div class="tool-group">
@@ -240,28 +323,49 @@
         <button
           class:active={activeTool === "light"}
           onclick={() => selectTool("light")}
-          aria-label="Place Lights"><span>💡</span> Light</button
+          aria-label="Place Lights"
         >
+          <span>💡</span> Light
+        </button>
         <button
           class:active={activeTool === "audio"}
           onclick={() => selectTool("audio")}
-          aria-label="Place Audio"><span>🎵</span> Audio</button
+          aria-label="Place Audio"
         >
+          <span>🎵</span> Audio
+        </button>
         <button
           class:active={activeTool === "event"}
           onclick={() => selectTool("event")}
-          aria-label="Place Event"><span>⚡</span> Event</button
+          aria-label="Place Event"
         >
+          <span>⚡</span> Event
+        </button>
         <button
           class:active={activeTool === "spawn"}
           onclick={() => selectTool("spawn")}
-          aria-label="Place Spawn"><span>🚩</span> Spawn</button
+          aria-label="Place Spawn"
         >
+          <span>🚩</span> Spawn
+        </button>
         <button
           class:active={activeTool === "emitter"}
           onclick={() => selectTool("emitter")}
-          aria-label="Place Emitter"><span>🌧️</span> Emitter</button
+          aria-label="Place Emitter"
         >
+          <span>🌧️</span> Emitter
+        </button>
+      </div>
+
+      <div class="tool-group">
+        <span class="group-label">📦 ASSETS</span>
+        <button
+          class:active={activeTool === "asset"}
+          onclick={() => selectTool("asset")}
+          aria-label="Global Asset Library"
+        >
+          <span>📂</span> Library
+        </button>
       </div>
 
       <div class="tool-group">
@@ -269,8 +373,17 @@
         <button
           class:active={lightingPreview}
           onclick={() => mapStore.toggleLightingPreview()}
-          aria-label="Toggle Lighting Preview"><span>🌓</span> Preview</button
+          aria-label="Toggle Lighting Preview"
         >
+          <span>🌓</span> Preview
+        </button>
+        <button
+          class:active={visionEnabled}
+          onclick={() => mapStore.toggleVision()}
+          aria-label="Toggle Vision Sandbox"
+        >
+          <span>👁️</span> Vision
+        </button>
       </div>
     </div>
 
@@ -282,6 +395,7 @@
             <input type="checkbox" bind:checked={packageCompound} />
             <span>Package Catalog as Compound Dungeon</span>
           </label>
+
           <div style="display: flex; gap: 8px; flex-direction: column;">
             <div style="display: flex; gap: 8px;">
               <button
@@ -298,9 +412,12 @@
                     )
                   )
                     mapStore.closeProject();
-                }}>❌ Close</button
+                }}
               >
+                ❌ Close
+              </button>
             </div>
+
             <label
               class="action-btn"
               style="background: #1e293b; color: #e2e8f0; text-align: center; cursor: pointer;"
@@ -313,6 +430,7 @@
                 onchange={triggerFileImport}
               />
             </label>
+
             <div style="display: flex; gap: 8px;">
               <button
                 class="action-btn"
@@ -329,6 +447,7 @@
                     : mapStore.exportVTT()}>📤 Compile v2</button
               >
             </div>
+
             <button
               class="action-btn secure"
               onclick={() => mapStore.exportSecureVTT(packageCompound)}
@@ -510,11 +629,89 @@
             </select>
           </label>
         </div>
+      {:else if displayCategory === "asset"}
+        <div class="panel-section">
+          <h3>📂 LOCAL ASSET LIBRARY</h3>
+
+          {#if isDesktopPro}
+            <button
+              class="action-btn wave"
+              onclick={() => mapStore.mountAssetLibrary()}
+            >
+              📁 Mount Local Folder
+            </button>
+            <p class="helper-text" style="margin-top: 8px;">
+              Select a directory on your hard drive to instantly load custom
+              tokens, props, and audio tracks into the engine without uploading.
+            </p>
+
+            {#if mapStore.globalAssets.audio.length > 0}
+              <div style="margin-top: 15px;">
+                <span
+                  style="font-size: 10px; font-weight: bold; color: #00f0ff;"
+                  >AUDIO LOADED ({mapStore.globalAssets.audio.length})</span
+                >
+                <ul
+                  style="font-size: 11px; color: #e2e8f0; padding-left: 15px; margin-top: 4px; max-height: 100px; overflow-y: auto;"
+                >
+                  {#each mapStore.globalAssets.audio as aud}
+                    <li>{aud.name}</li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            {#if mapStore.globalAssets.images.length > 0}
+              <div style="margin-top: 15px;">
+                <span
+                  style="font-size: 10px; font-weight: bold; color: #00f0ff;"
+                  >PROPS & TOKENS ({mapStore.globalAssets.images.length})</span
+                >
+                <div
+                  style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; max-height: 150px; overflow-y: auto; padding-right: 4px;"
+                >
+                  {#each mapStore.globalAssets.images as img}
+                    <img
+                      src={img.data}
+                      alt={img.name}
+                      draggable="true"
+                      ondragstart={(e) => {
+                        e.dataTransfer.setData(
+                          "application/json",
+                          JSON.stringify({
+                            type: "asset_prop",
+                            image: img.data,
+                            name: img.name,
+                          }),
+                        );
+                        e.dataTransfer.effectAllowed = "copy";
+                      }}
+                      style="width: 48px; height: 48px; object-fit: cover; border: 1px solid #334155; border-radius: 4px; cursor: grab;"
+                    />
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          {:else}
+            <!-- THE OPEN CORE UPSELL -->
+            <button
+              class="action-btn secure"
+              style="cursor: not-allowed; opacity: 0.8; font-weight: bold;"
+            >
+              ⭐ Upgrade to Pro
+            </button>
+            <p class="helper-text" style="margin-top: 12px;">
+              The Global Asset Library requires unrestricted local file system
+              access. Upgrade to the Desktop Pro version to securely mount local
+              OS folders and drag-and-drop gigabytes of assets instantly.
+            </p>
+          {/if}
+        </div>
       {:else}
         <div class="panel-section">
           <h3>📝 {displayCategory.toUpperCase()} CONFIG</h3>
 
-          {#if selectedItems.length === 0}
+          {#if selectedItems.length === 0 && displayCategory !== "prop"}
             <div class="status-indicator editing-defaults">
               <span>✏️ Configuring Defaults for New {displayCategory}s</span>
             </div>
@@ -529,7 +726,84 @@
             </div>
           {/if}
 
-          {#if displayCategory === "wall"}
+          {#if displayCategory === "prop"}
+            <label>
+              <span>Asset Name:</span>
+              <input type="text" value={activeConf.name || "Prop"} disabled />
+            </label>
+            <label>
+              <span>Rotation (Degrees):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="0"
+                  max="360"
+                  value={activeConf.rotation ?? 0}
+                  oninput={(e) =>
+                    handlePropChange(
+                      "prop",
+                      "rotation",
+                      parseFloat(e.target.value),
+                    )}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="360"
+                  value={activeConf.rotation ?? 0}
+                  onchange={(e) =>
+                    handlePropChange(
+                      "prop",
+                      "rotation",
+                      parseFloat(e.target.value),
+                    )}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Scale (%):</span>
+              <div class="slider-row">
+                <input
+                  type="range"
+                  min="10"
+                  max="500"
+                  value={activeConf.scale ?? 100}
+                  oninput={(e) =>
+                    handlePropChange(
+                      "prop",
+                      "scale",
+                      parseFloat(e.target.value),
+                    )}
+                />
+                <input
+                  type="number"
+                  min="10"
+                  max="500"
+                  value={activeConf.scale ?? 100}
+                  onchange={(e) =>
+                    handlePropChange(
+                      "prop",
+                      "scale",
+                      parseFloat(e.target.value),
+                    )}
+                />
+              </div>
+            </label>
+            <label>
+              <span>Z-Axis Elevation:</span>
+              <input
+                type="number"
+                step="0.5"
+                value={activeConf.position?.z ?? 0}
+                onchange={(e) =>
+                  handlePropChange(
+                    "prop",
+                    "position.z",
+                    parseFloat(e.target.value),
+                  )}
+              />
+            </label>
+          {:else if displayCategory === "wall"}
             <label>
               <span>Wall Collision Presets:</span>
               <select
@@ -593,6 +867,91 @@
                 />
               </label>
             </div>
+
+            <!-- 🤖 SMART GEOMETRY AUTO-WALL CONTAINER -->
+            {#if isDesktopPro && selectedItems.length === 0}
+              <div
+                class="auto-match-panel"
+                style="margin-top: 15px; border-color: rgba(0, 240, 255, 0.4); background: rgba(0, 240, 255, 0.02);"
+              >
+                <span
+                  style="font-size: 11px; font-weight: bold; color: #00f0ff; letter-spacing: 0.5px;"
+                >
+                  🤖 SMART GEOMETRY COMPUTER VISION
+                </span>
+                <label style="margin-top: 8px;">
+                  <span>Edge Trace Sensitivity:</span>
+                  <div class="slider-row">
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      bind:value={edgeSensitivity}
+                    />
+                    <span
+                      style="font-family: monospace; font-size: 11px; width: 30px; text-align: right; color: #fff;"
+                    >
+                      {Math.round(edgeSensitivity * 100)}%
+                    </span>
+                  </div>
+                </label>
+                <button
+                  class="action-btn wave"
+                  style="margin-top: 10px; width: 100%; justify-content: center; font-weight: bold;"
+                  onclick={handleAutoTraceWalls}
+                  disabled={isCrunchingWalls}
+                >
+                  {#if isCrunchingWalls}
+                    <span>⏳ Crunching Pixels...</span>
+                  {:else}
+                    <span>🪄 Auto-Trace Background Walls</span>
+                  {/if}
+                </button>
+              </div>
+            {/if}
+            <!-- 🤖 SMART GEOMETRY AUTO-WALL CONTAINER -->
+            {#if isDesktopPro && selectedItems.length === 0}
+              <div
+                class="auto-match-panel"
+                style="margin-top: 15px; border-color: rgba(0, 240, 255, 0.4); background: rgba(0, 240, 255, 0.02);"
+              >
+                <span
+                  style="font-size: 11px; font-weight: bold; color: #00f0ff; letter-spacing: 0.5px;"
+                >
+                  🤖 SMART GEOMETRY COMPUTER VISION
+                </span>
+                <label style="margin-top: 8px;">
+                  <span>Edge Trace Sensitivity:</span>
+                  <div class="slider-row">
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      bind:value={edgeSensitivity}
+                    />
+                    <span
+                      style="font-family: monospace; font-size: 11px; width: 30px; text-align: right; color: #fff;"
+                    >
+                      {Math.round(edgeSensitivity * 100)}%
+                    </span>
+                  </div>
+                </label>
+                <button
+                  class="action-btn wave"
+                  style="margin-top: 10px; width: 100%; justify-content: center; font-weight: bold;"
+                  onclick={handleAutoTraceWalls}
+                  disabled={isCrunchingWalls}
+                >
+                  {#if isCrunchingWalls}
+                    <span>⏳ Crunching Pixels...</span>
+                  {:else}
+                    <span>🪄 Auto-Trace Background Walls</span>
+                  {/if}
+                </button>
+              </div>
+            {/if}
           {:else if displayCategory === "portal"}
             <label>
               <span>Portal Architecture:</span>
@@ -1453,8 +1812,10 @@
                     mapStore.convertCategory(
                       selectedItems[0].id,
                       displayCategory === "wall" ? "portals" : "walls",
-                    )}>🔄 Convert</button
+                    )}
                 >
+                  🔄 Convert
+                </button>
               {/if}
               <button
                 class="action-btn wave"
@@ -1468,29 +1829,20 @@
           {/if}
         </div>
       {/if}
-
-      {#if activeTool === "wall" || activeTool === "portal" || activeTool === "roof"}
-        <div class="panel-section drafting-mode">
-          <p class="helper-text">
-            <b>Left-Click</b> points to draw.<br />Hold <b>Shift</b> to bypass
-            grid snap.<br /><b>Right-Click</b> or <b>Enter</b> to finish.
-          </p>
-        </div>
-      {/if}
-      {#if activeTool === "select"}
-        <div class="panel-section drafting-mode">
-          <p class="helper-text">
-            Use <b>Ctrl+C</b> to copy, <b>Ctrl+V</b> to paste at cursor, or
-            <b>Ctrl+D</b> to clone.
-          </p>
-        </div>
-      {/if}
     </div>
+  </div>
+
+  <!-- CAD STATUS BAR -->
+  <div class="status-bar">
+    <div class="status-segment coord-readout">X: {mouseX} | Y: {mouseY}</div>
+    <div class="status-segment zoom-readout">Zoom: {zoomScale}%</div>
+    <div class="status-segment hint">{@html hotkeyHint}</div>
+    <div class="status-segment right">UVTT v2 Compiler</div>
   </div>
 {/if}
 
 <style>
-  /* LEVEL NAVIGATION BAR STYLES */
+  /* --- LEVEL NAVIGATION BAR STYLES --- */
   .level-nav-bar {
     position: absolute;
     top: 20px;
@@ -1507,14 +1859,17 @@
     align-items: center;
     gap: 12px;
   }
+
   .level-controls {
     display: flex;
     align-items: center;
     gap: 10px;
   }
+
   .level-nav-bar .icon {
     font-size: 16px;
   }
+
   .level-select {
     background: #1e293b;
     border: 1px solid #334155;
@@ -1526,6 +1881,7 @@
     min-width: 150px;
     cursor: pointer;
   }
+
   .level-rename {
     background: transparent;
     border: 1px dashed transparent;
@@ -1535,17 +1891,20 @@
     width: 140px;
     transition: all 0.2s;
   }
+
   .level-rename:hover,
   .level-rename:focus {
     background: #1e293b;
     border-color: #334155;
   }
+
   .divider {
     width: 1px;
     height: 24px;
     background: #334155;
     margin: 0 4px;
   }
+
   .icon-btn {
     background: transparent;
     border: none;
@@ -1559,24 +1918,29 @@
     justify-content: center;
     transition: all 0.2s;
   }
+
   .icon-btn:hover {
     transform: scale(1.1);
   }
+
   .icon-btn.positive:hover {
     text-shadow: 0 0 8px #22c55e;
   }
+
   .icon-btn.negative:hover {
     text-shadow: 0 0 8px #ef4444;
   }
+
   .icon-btn.wave:hover {
     text-shadow: 0 0 8px #3b82f6;
   }
+
   .import-btn {
     margin: 0;
     display: flex;
   }
 
-  /* EXISTING TOOLBAR STYLES */
+  /* --- EXISTING TOOLBAR STYLES --- */
   .toolbar-wrapper {
     position: absolute;
     top: 20px;
@@ -1586,6 +1950,7 @@
     display: flex;
     gap: 15px;
   }
+
   .tool-selector,
   .properties-panel {
     background: #0b1329ee;
@@ -1602,11 +1967,13 @@
     flex-direction: column;
     gap: 15px;
   }
+
   .tool-group {
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
+
   .group-label {
     font-size: 10px;
     font-weight: bold;
@@ -1619,7 +1986,10 @@
 
   .properties-panel {
     width: 280px;
+    max-height: 85vh;
+    overflow-y: auto;
   }
+
   .panel-section {
     display: flex;
     flex-direction: column;
@@ -1628,6 +1998,7 @@
     padding-bottom: 10px;
     margin-bottom: 10px;
   }
+
   .panel-section:last-child {
     border-bottom: none;
     margin-bottom: 0;
@@ -1641,16 +2012,19 @@
     border-radius: 4px;
     text-align: center;
   }
+
   .editing-defaults {
     background: rgba(148, 163, 184, 0.1);
     color: #94a3b8;
     border: 1px dashed #475569;
   }
+
   .editing-active {
     background: rgba(0, 240, 255, 0.1);
     color: #00f0ff;
     border: 1px solid #00f0ff;
   }
+
   .auto-match-panel {
     background: rgba(0, 240, 255, 0.05);
     border: 1px dashed rgba(0, 240, 255, 0.3);
@@ -1659,12 +2033,6 @@
     margin-top: 5px;
   }
 
-  .drafting-mode {
-    background: rgba(0, 240, 255, 0.05);
-    padding: 10px;
-    border: 1px dashed rgba(0, 240, 255, 0.2);
-    border-radius: 6px;
-  }
   .helper-text {
     font-size: 11px;
     color: #94a3b8;
@@ -1678,6 +2046,7 @@
     color: #00f0ff;
     text-transform: uppercase;
   }
+
   label {
     display: flex;
     flex-direction: column;
@@ -1685,6 +2054,7 @@
     font-size: 12px;
     color: #94a3b8;
   }
+
   .checkbox-row {
     flex-direction: row;
     align-items: center;
@@ -1719,11 +2089,14 @@
     gap: 8px;
     width: 100%;
   }
+
   .slider-row input[type="range"] {
     flex: 1;
     min-width: 0;
     box-sizing: border-box;
+    accent-color: #00f0ff;
   }
+
   .slider-row input[type="number"] {
     width: 50px;
     flex-shrink: 0;
@@ -1745,9 +2118,11 @@
     transition: all 0.2s;
     font-size: 13px;
   }
+
   button:hover {
     background: #334155;
   }
+
   button.active {
     background: #00f0ff22;
     border-color: #00f0ff;
@@ -1760,19 +2135,84 @@
     padding: 8px;
     justify-content: center;
   }
+
   .action-btn.positive {
     background: #ef444422;
     border-color: #ef4444;
     color: #fca5a5;
   }
+
   .action-btn.wave {
     background: #3b82f622;
     border-color: #3b82f6;
     color: #93c5fd;
   }
+
   .action-btn.secure {
     background: #a855f722;
     border-color: #a855f7;
     color: #d8b4fe;
+  }
+
+  /* --- CAD STATUS BAR STYLES --- */
+  .status-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100vw;
+    height: 30px;
+    background: #05080edd;
+    border-top: 1px solid #1e293b;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    box-sizing: border-box;
+    z-index: 100;
+    font-size: 11px;
+    color: #94a3b8;
+    gap: 20px;
+    backdrop-filter: blur(4px);
+  }
+
+  .status-segment {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .coord-readout {
+    width: 120px;
+    font-family: monospace;
+    color: #00f0ff;
+  }
+
+  .zoom-readout {
+    width: 80px;
+    font-family: monospace;
+    color: #e2e8f0;
+  }
+
+  .status-segment.hint {
+    flex: 1;
+    justify-content: center;
+    color: #64748b;
+  }
+
+  :global(.status-segment.hint .key) {
+    color: #e2e8f0;
+    font-weight: bold;
+  }
+
+  :global(.status-segment.hint .sep) {
+    margin: 0 8px;
+    color: #334155;
+  }
+
+  .status-segment.right {
+    margin-left: auto;
+    color: #3b82f6;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
   }
 </style>
