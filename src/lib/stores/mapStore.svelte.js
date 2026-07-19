@@ -281,12 +281,20 @@ class MapStore {
         const anchorX = Math.min(boxes[0].sx, boxes[0].ex);
         const anchorY = Math.min(boxes[0].sy, boxes[0].ey);
 
-        // Calculate offset to ensure the grid intersection lands exactly on the anchor
         const modX = ((anchorX % newPpg) + newPpg) % newPpg;
         const modY = ((anchorY % newPpg) + newPpg) % newPpg;
         
         const res = this.activeMap.manifest.resolution;
+        const oldPpg = Number(res.pixels_per_grid) || 70;
+        
+        // Fix: Maintain absolute image size in pixels so the map doesn't scale WITH the grid!
+        const pixelWidth = res.map_size[0] * oldPpg;
+        const pixelHeight = res.map_size[1] * oldPpg;
+        
         res.pixels_per_grid = newPpg;
+        res.map_size[0] = pixelWidth / newPpg;
+        res.map_size[1] = pixelHeight / newPpg;
+        
         res.map_offset_x = -modX;
         res.map_offset_y = -modY;
 
@@ -1460,6 +1468,56 @@ class MapStore {
     duplicateSelected() {
         this.copySelected();
         this.pasteClipboard(0, 0);
+    }
+
+    // --- GLOBAL ASSET LIBRARY BRIDGE ---
+    async mountAssetLibrary() {
+        if (window.go && window.go.main && window.go.main.App && window.go.main.App.SelectAssetDirectory) {
+            try {
+                const assets = await window.go.main.App.SelectAssetDirectory();
+                if (assets && assets.length > 0) {
+                    const images = assets.filter(a => a.type === 'image');
+                    const audio = assets.filter(a => a.type === 'audio');
+                    this.globalAssets = { images, audio };
+
+                    const audioPromises = audio.map(async (a) => {
+                        try {
+                            const res = await fetch(a.data);
+                            const blob = await res.blob();
+                            this.audioBlobs[a.name] = blob;
+                        } catch (e) {
+                            console.error(`Failed to fetch local audio: ${a.name}`);
+                        }
+                    });
+                    
+                    await Promise.all(audioPromises);
+                    this.updateTrigger++;
+                }
+            } catch (err) {
+                console.error("Failed to load asset directory:", err);
+            }
+        } else {
+            alert("Asset Library requires the native Wails Desktop build running.");
+        }
+    }
+
+    addProp(x, y, imageURL, name) {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+        const ds = this.defaultSettings.prop;
+        const prop = {
+            id: crypto.randomUUID(),
+            name: name,
+            image: imageURL,
+            position: { x, y, z: ds.position.z },
+            rotation: ds.rotation,
+            scale: ds.scale
+        };
+        if (!activeMap.manifest.entities.props) activeMap.manifest.entities.props = [];
+        activeMap.manifest.entities.props.push(prop);
+        this.pushHistory("Added Prop Asset");
+        this.updateSpatialIndex();
+        this.updateTrigger++;
     }
 }
 
