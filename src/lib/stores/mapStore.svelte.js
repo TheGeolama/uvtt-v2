@@ -700,6 +700,54 @@ class MapStore {
         this.updateSpatialIndex();
     }
 
+    async importImageAsMap(file) {
+        try {
+            // Read file into Base64 for Canvas & Go Backend
+            const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            // Get intrinsic image dimensions to build the grid
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = dataUrl;
+            });
+
+            const ppg = 70; // Default Pixels Per Grid
+            const mapWidth = Math.ceil(img.width / ppg);
+            const mapHeight = Math.ceil(img.height / ppg);
+
+            const newId = crypto.randomUUID();
+            const newMap = {
+                id: newId,
+                filename: file.name.split('.')[0] || "Imported Map",
+                manifest: {
+                    resolution: { 
+                        map_origin: [0, 0],
+                        map_size: [mapWidth, mapHeight],
+                        pixels_per_grid: ppg, 
+                        grid_line_width: 1.5, 
+                        subgrid_line_width: 1.0 
+                    },
+                    geometry: { walls: [], portals: [], overhead: [] },
+                    entities: { lights: [], landing_zones: [], events: [], emitters: [], audio: { zones: [] }, props: [] }
+                },
+                imageUrl: dataUrl,
+                history: [],
+                historyIndex: -1
+            };
+            this.appendLevel(newMap);
+        } catch (err) {
+            console.error("Failed to load image as map:", err);
+            alert("Could not process image file.");
+        }
+    }
+
     deleteMapLevel(id) {
         if (this.catalog.length <= 1) {
             alert("You cannot delete the only level in the project.");
@@ -1404,7 +1452,6 @@ class MapStore {
     }
 
     // --- 🤖 PRO EXCLUSIVE SMART GEOMETRY AUTO-WALLS ---
-// --- 🤖 PRO EXCLUSIVE SMART GEOMETRY AUTO-WALLS ---
     async autoTraceMapWalls(sensitivityThreshold) {
         if (!this.activeMap || !this.activeMap.imageUrl) {
             alert("No map background image loaded to trace.");

@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import { mapStore } from "$lib/stores/mapStore.svelte.js";
+  import { upgradeLegacyMap } from "$lib/utils/legacyParser.js";
   import * as PIXI from "pixi.js";
 
   let canvasContainer;
@@ -912,6 +913,25 @@
   // --- DROP EVENT HANDLERS ---
   function handleDrop(e) {
     e.preventDefault();
+
+    // 1. Check for physical files dropped from the OS (Windows/Mac)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      const ext = file.name.split(".").pop().toLowerCase();
+
+      if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
+        mapStore.importImageAsMap(file);
+        return;
+      } else if (["dd2vtt", "uvtt", "json", "txt"].includes(ext)) {
+        file.text().then((text) => {
+          const parsedMap = upgradeLegacyMap(text, file.name);
+          if (parsedMap) mapStore.appendLevel(parsedMap);
+        });
+        return;
+      }
+    }
+
+    // 2. Fallback to existing internal drag-and-drop (Asset Library Props)
     const dataStr = e.dataTransfer.getData("application/json");
     if (!dataStr) return;
 
@@ -920,7 +940,6 @@
       if (data.type === "asset_prop") {
         const coords = getGridCoordinates(e.clientX, e.clientY, true, "select");
         mapStore.addProp(coords.exactX, coords.exactY, data.image, data.name);
-
         if (activeTool !== "select") mapStore.setTool("select");
       }
     } catch (err) {
