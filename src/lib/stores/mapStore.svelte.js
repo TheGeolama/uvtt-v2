@@ -1404,6 +1404,7 @@ class MapStore {
     }
 
     // --- 🤖 PRO EXCLUSIVE SMART GEOMETRY AUTO-WALLS ---
+// --- 🤖 PRO EXCLUSIVE SMART GEOMETRY AUTO-WALLS ---
     async autoTraceMapWalls(sensitivityThreshold) {
         if (!this.activeMap || !this.activeMap.imageUrl) {
             alert("No map background image loaded to trace.");
@@ -1412,11 +1413,24 @@ class MapStore {
 
         if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoTraceWalls) {
             try {
+                let payload = this.activeMap.imageUrl;
+                
+                // If the image is a browser Blob, convert it to Base64 for the Go backend
+                if (payload.startsWith('blob:') || payload.startsWith('http')) {
+                    const res = await fetch(payload);
+                    const blob = await res.blob();
+                    payload = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                }
+
                 const pixelsPerGrid = parseFloat(this.activeMap.manifest.resolution?.pixels_per_grid) || 70.0;
                 
                 // Invoke Go compute kernel
                 const polylinePaths = await window.go.main.App.AutoTraceWalls(
-                    this.activeMap.imageUrl, 
+                    payload, 
                     parseFloat(sensitivityThreshold), 
                     pixelsPerGrid
                 );
