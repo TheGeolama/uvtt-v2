@@ -226,15 +226,16 @@ class MapStore {
 
     // --- SCHEMA COMPLIANT DEFAULTS ---
     defaultSettings = $state({
-        wall: { properties: { type: 'standard', bottom: 0.0, top: 10.0 } },
-        portal: { properties: { type: 'door', state: 'closed', bottom: 0.0, top: 10.0 } },
-        roof: { properties: { tint: '#475569', opacity: 100, hidden: false, bottom: 10.0, top: 20.0 } },
-        light: { type: 'point', position: { z: 0 }, properties: { color: '#ffffff', intensity: 1.0, decay_model: 'inverse_square', radius: { bright: 5.0, dim: 10.0 }, animation: { profile: 'none', speed: 0.5, intensity_variance: 0.2 }, rotation: 0, cone_angle: 60 } },
-        spawn: { name: 'New Spawn', shape: 'circle', is_default: false, heading_degrees: 0.0 },
-        event: { name: 'New Event', eventType: 'Trap/Door Trigger', activation: 'proximity', trigger_bounds: { radius: 0.5 }, targetSpawnId: "", autoCreateMatch: false, targetFloorId: "" },
-        audio: { track: "", volume: 100, radius: 5, inner_radius: 2.5, muffledByWalls: true },
-        emitter: { type: 'weather', style: 'rain', isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100, direction: 180, speed: 50, intensity: 50, variance: 10, graphic: '', position: { z: 0 } },
-        prop: { scale: 100, rotation: 0, position: { z: 0 } },
+        wall: { properties: { type: 'standard', bottom: 0.0, top: 10.0, visibility: 'visible' } },
+        portal: { properties: { type: 'door', state: 'closed', bottom: 0.0, top: 10.0, visibility: 'visible' } },
+        roof: { properties: { tint: '#475569', opacity: 100, hidden: false, bottom: 10.0, top: 20.0, visibility: 'visible' } },
+        light: { type: 'point', position: { z: 0 }, properties: { color: '#ffffff', intensity: 1.0, decay_model: 'inverse_square', radius: { bright: 5.0, dim: 10.0 }, animation: { profile: 'none', speed: 0.5, intensity_variance: 0.2 }, rotation: 0, cone_angle: 60, visibility: 'visible' } },
+        spawn: { name: 'New Spawn', shape: 'circle', is_default: false, heading_degrees: 0.0, properties: { visibility: 'visible' } },
+        // NEW: Event object now inherently supports target_entity_ids and target_action for state toggles
+        event: { name: 'New Event', eventType: 'State Toggle', activation: 'proximity', trigger_bounds: { radius: 0.5 }, targetSpawnId: "", autoCreateMatch: false, targetFloorId: "", target_entity_ids: [], target_action: "toggle_visibility", properties: { visibility: 'visible' } },
+        audio: { track: "", volume: 100, radius: 5, inner_radius: 2.5, muffledByWalls: true, properties: { visibility: 'visible' } },
+        emitter: { type: 'weather', style: 'rain', isGlobal: false, layering: 'above', tint: '#ffffff', scale: 100, direction: 180, speed: 50, intensity: 50, variance: 10, graphic: '', position: { z: 0 }, properties: { visibility: 'visible' } },
+        prop: { scale: 100, rotation: 0, position: { z: 0 }, properties: { visibility: 'visible' } },
         asset: {} 
     });
 
@@ -1074,6 +1075,23 @@ class MapStore {
         this.triggerAutoSave();
     }
 
+    clearHistory() {
+        const activeMap = this.activeMap;
+        if (!activeMap) return;
+
+        const currentState = JSON.parse(JSON.stringify(activeMap.manifest));
+        
+        activeMap.history = [{
+            actionName: "History Cleared",
+            timestamp: Date.now(),
+            snapshot: currentState
+        }];
+        activeMap.historyIndex = 0;
+
+        this.updateTrigger++;
+        this.triggerAutoSave();
+    }
+
     // --- NODE MUTATIONS (FIXED: Deep Cloning array paths so Svelte 5 absolutely triggers reactivity) ---
     deleteVectorNode(exactX, exactY, thresholdSq) {
         const activeMap = this.activeMap;
@@ -1263,7 +1281,8 @@ class MapStore {
             name: ds.name, 
             shape: ds.shape, 
             is_default: ds.is_default,
-            heading_degrees: ds.heading_degrees 
+            heading_degrees: ds.heading_degrees,
+            properties: JSON.parse(JSON.stringify(ds.properties))
         };
         
         if (ds.is_default) {
@@ -1291,7 +1310,10 @@ class MapStore {
             eventType: ds.eventType, 
             activation: ds.activation,
             targetSpawnId: ds.targetSpawnId,
-            trigger_bounds: { center: {x, y}, radius: ds.trigger_bounds.radius }
+            target_entity_ids: [...ds.target_entity_ids],
+            target_action: ds.target_action,
+            trigger_bounds: { center: {x, y}, radius: ds.trigger_bounds.radius },
+            properties: JSON.parse(JSON.stringify(ds.properties))
         };
 
         const isTeleportOrStairs = ds.eventType === 'Teleport' || ds.eventType === 'Stairs/Ladder';
@@ -1316,7 +1338,8 @@ class MapStore {
                     name: `Return from ${targetMap.filename || 'Target'}`, 
                     shape: 'circle', 
                     is_default: false,
-                    heading_degrees: 0.0
+                    heading_degrees: 0.0,
+                    properties: JSON.parse(JSON.stringify(ds.properties))
                 });
 
                 if (!targetMap.manifest.entities.events) targetMap.manifest.entities.events = [];
@@ -1328,7 +1351,10 @@ class MapStore {
                     eventType: ds.eventType, 
                     activation: ds.activation,
                     targetSpawnId: localSpawnId, 
-                    trigger_bounds: { center: {x, y}, radius: ds.trigger_bounds.radius }
+                    target_entity_ids: [],
+                    target_action: "toggle_visibility",
+                    trigger_bounds: { center: {x, y}, radius: ds.trigger_bounds.radius },
+                    properties: JSON.parse(JSON.stringify(ds.properties))
                 });
 
                 targetMap.manifest.entities.landing_zones.push({
@@ -1337,7 +1363,8 @@ class MapStore {
                     name: `Arrival from ${activeMap.filename || 'Origin'}`, 
                     shape: 'circle', 
                     is_default: false,
-                    heading_degrees: 0.0
+                    heading_degrees: 0.0,
+                    properties: JSON.parse(JSON.stringify(ds.properties))
                 });
             }
         }
@@ -1360,7 +1387,7 @@ class MapStore {
         const ds = this.defaultSettings.audio;
         const audio = { 
             id: crypto.randomUUID(), center: {x, y}, radius: ds.radius, inner_radius: ds.inner_radius,
-            volume: ds.volume, muffledByWalls: ds.muffledByWalls, track: ds.track 
+            volume: ds.volume, muffledByWalls: ds.muffledByWalls, track: ds.track, properties: JSON.parse(JSON.stringify(ds.properties))
         };
         if (!activeMap.manifest.entities.audio) activeMap.manifest.entities.audio = { zones: [] };
         if (!activeMap.manifest.entities.audio.zones) activeMap.manifest.entities.audio.zones = [];
@@ -1378,7 +1405,8 @@ class MapStore {
             position: {x, y, z: ds.position.z}, 
             type: ds.type, style: ds.style,
             isGlobal: ds.isGlobal, layering: ds.layering, tint: ds.tint, scale: ds.scale,
-            direction: ds.direction, speed: ds.speed, intensity: ds.intensity, variance: ds.variance, graphic: ds.graphic
+            direction: ds.direction, speed: ds.speed, intensity: ds.intensity, variance: ds.variance, graphic: ds.graphic,
+            properties: JSON.parse(JSON.stringify(ds.properties))
         };
         if (!activeMap.manifest.entities.emitters) activeMap.manifest.entities.emitters = [];
         activeMap.manifest.entities.emitters.push(emitter);
@@ -1695,7 +1723,8 @@ class MapStore {
             image: imageURL,
             position: { x, y, z: ds.position.z },
             rotation: ds.rotation,
-            scale: ds.scale
+            scale: ds.scale,
+            properties: JSON.parse(JSON.stringify(ds.properties))
         };
         if (!activeMap.manifest.entities.props) activeMap.manifest.entities.props = [];
         activeMap.manifest.entities.props.push(prop);

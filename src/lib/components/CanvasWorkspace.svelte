@@ -23,7 +23,7 @@
   let dragStart = { x: 0, y: 0 };
   let originalPan = { x: 0, y: 0 };
 
-  // DRAG STATE (Updated to support individual nodes)
+  // DRAG STATE
   let draggedItemId = null;
   let draggedNodeIndex = null;
   let lastDragGrid = null;
@@ -228,6 +228,14 @@
     }
   }
 
+  // Helper to extract alpha modifier based on visibility
+  function getVisAlpha(item) {
+    if (!item || !item.properties) return 1.0;
+    if (item.properties.visibility === "hidden") return 0.2;
+    if (item.properties.visibility === "gm_only") return 0.5;
+    return 1.0;
+  }
+
   function drawCanvas(manifest) {
     if (
       !gridContainer ||
@@ -256,7 +264,6 @@
       const originMark = new PIXI.Graphics();
       gridContainer.addChild(originMark);
 
-      // Absolute (0,0) on the grid Container is the top-left pin point
       originMark
         .circle(0, 0, 5)
         .fill({ color: 0xef4444, alpha: 1 })
@@ -272,7 +279,6 @@
     }
 
     // --- DYNAMIC BOUNDING BOX GRID RENDERING ---
-    // Ensure the grid covers the entirety of the map image, regardless of negative or positive offset
     const offX = Number(res.map_offset_x) || 0;
     const offY = Number(res.map_offset_y) || 0;
     const minX = offX;
@@ -339,6 +345,8 @@
 
       const px = (Number(prop.position.x) - originX) * gridX;
       const py = (Number(prop.position.y) - originY) * gridY;
+      const vAlpha = getVisAlpha(prop);
+
       try {
         const texture = getTexture(prop.image);
         const sprite = new PIXI.Sprite(texture);
@@ -347,6 +355,7 @@
         sprite.y = py;
         sprite.rotation = (Number(prop.rotation) || 0) * (Math.PI / 180);
         sprite.scale.set((Number(prop.scale) || 100) / 100);
+        sprite.alpha = vAlpha;
         entitiesContainer.addChild(sprite);
 
         if (selectedIds.has(prop.id)) {
@@ -382,6 +391,8 @@
       .filter(Boolean);
 
     visibleEntityObjects.forEach((ent) => {
+      const vAlpha = getVisAlpha(ent);
+
       if (ent.properties?.radius) {
         const px = (Number(ent.position.x) - originX) * gridX;
         const py = (Number(ent.position.y) - originY) * gridY;
@@ -390,13 +401,15 @@
         const color = ent.properties.color || "#ffffff";
         entGfx
           .circle(px, py, dRad)
-          .fill({ color, alpha: 0.05 })
-          .stroke({ width: 1, color, alpha: 0.2 });
+          .fill({ color, alpha: 0.05 * vAlpha })
+          .stroke({ width: 1, color, alpha: 0.2 * vAlpha });
         entGfx
           .circle(px, py, bRad)
-          .fill({ color, alpha: 0.1 })
-          .stroke({ width: 1.5, color, alpha: 0.4 });
-        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+          .fill({ color, alpha: 0.1 * vAlpha })
+          .stroke({ width: 1.5, color, alpha: 0.4 * vAlpha });
+        entGfx
+          .circle(px, py, 4)
+          .fill({ color: "#ffffff", alpha: 0.9 * vAlpha });
         if (selectedIds.has(ent.id))
           entGfx
             .circle(px, py, 8)
@@ -407,9 +420,11 @@
         const rad = (Number(ent.radius) || 5) * gridX;
         entGfx
           .circle(px, py, rad)
-          .fill({ color: 0x3b82f6, alpha: 0.05 })
-          .stroke({ width: 2, color: 0x3b82f6, alpha: 0.4 });
-        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+          .fill({ color: 0x3b82f6, alpha: 0.05 * vAlpha })
+          .stroke({ width: 2, color: 0x3b82f6, alpha: 0.4 * vAlpha });
+        entGfx
+          .circle(px, py, 4)
+          .fill({ color: "#ffffff", alpha: 0.9 * vAlpha });
         if (selectedIds.has(ent.id))
           entGfx
             .circle(px, py, 8)
@@ -420,9 +435,11 @@
         const rad = (Number(ent.trigger_bounds.radius) || 2) * gridX;
         entGfx
           .rect(px - rad, py - rad, rad * 2, rad * 2)
-          .fill({ color: 0xa855f7, alpha: 0.1 })
-          .stroke({ width: 2, color: 0xa855f7, alpha: 0.6 });
-        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+          .fill({ color: 0xa855f7, alpha: 0.1 * vAlpha })
+          .stroke({ width: 2, color: 0xa855f7, alpha: 0.6 * vAlpha });
+        entGfx
+          .circle(px, py, 4)
+          .fill({ color: "#ffffff", alpha: 0.9 * vAlpha });
         if (selectedIds.has(ent.id))
           entGfx
             .circle(px, py, 8)
@@ -436,14 +453,16 @@
         if (ent.shape === "circle")
           entGfx
             .ellipse(px, py, halfX, halfY)
-            .fill({ color, alpha: 0.2 })
-            .stroke({ width: 2, color, alpha: 0.8 });
+            .fill({ color, alpha: 0.2 * vAlpha })
+            .stroke({ width: 2, color, alpha: 0.8 * vAlpha });
         else
           entGfx
             .rect(px - halfX, py - halfY, gridX, gridY)
-            .fill({ color, alpha: 0.2 })
-            .stroke({ width: 2, color, alpha: 0.8 });
-        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+            .fill({ color, alpha: 0.2 * vAlpha })
+            .stroke({ width: 2, color, alpha: 0.8 * vAlpha });
+        entGfx
+          .circle(px, py, 4)
+          .fill({ color: "#ffffff", alpha: 0.9 * vAlpha });
         if (selectedIds.has(ent.id))
           entGfx
             .circle(px, py, 8)
@@ -453,8 +472,10 @@
         const py = (Number(ent.position.y) - originY) * gridY;
         entGfx.moveTo(px - 10, py).lineTo(px + 10, py);
         entGfx.moveTo(px, py - 10).lineTo(px, py + 10);
-        entGfx.stroke({ width: 3, color: 0x06b6d4, alpha: 0.9 });
-        entGfx.circle(px, py, 4).fill({ color: "#ffffff", alpha: 0.9 });
+        entGfx.stroke({ width: 3, color: 0x06b6d4, alpha: 0.9 * vAlpha });
+        entGfx
+          .circle(px, py, 4)
+          .fill({ color: "#ffffff", alpha: 0.9 * vAlpha });
         if (selectedIds.has(ent.id))
           entGfx
             .circle(px, py, 8)
@@ -462,14 +483,14 @@
       }
     });
 
-    // === NEW LOGIC: DRAWING NODES FOR SELECTED VECTORS ===
     (manifest.geometry.overhead || []).forEach((roof) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
       const tint = roof.properties?.tint || "#475569";
       const opacity = (roof.properties?.opacity ?? 100) / 100;
       const isHidden = roof.properties?.hidden || false;
-      const renderOpacity = isHidden ? opacity * 0.5 : opacity;
+      const vAlpha = getVisAlpha(roof);
+      const renderOpacity = (isHidden ? opacity * 0.5 : opacity) * vAlpha;
       const strokeColor = isHidden ? 0xef4444 : tint;
 
       if (selectedIds.has(roof.id)) {
@@ -477,12 +498,11 @@
         gfx.stroke({
           width: 10,
           color: 0xffffff,
-          alpha: 0.8,
+          alpha: 0.8 * vAlpha,
           join: "round",
           cap: "round",
         });
 
-        // Draw physical node points!
         if (roof.path) {
           roof.path.forEach((pt) => {
             const px = (Number(pt.x) - originX) * gridX;
@@ -501,7 +521,7 @@
         gfx.stroke({
           width: 2,
           color: strokeColor,
-          alpha: isHidden ? 0.8 : renderOpacity,
+          alpha: (isHidden ? 0.8 : renderOpacity) * vAlpha,
         });
       } else {
         gfx.stroke({ width: 4, color: tint, alpha: renderOpacity });
@@ -511,18 +531,18 @@
     (manifest.geometry.walls || []).forEach((wall) => {
       const gfx = new PIXI.Graphics();
       geometryContainer.addChild(gfx);
+      const vAlpha = getVisAlpha(wall);
 
       if (selectedIds.has(wall.id)) {
         tracePath(gfx, wall.path, gridX, gridY, originX, originY);
         gfx.stroke({
           width: 12,
           color: 0xffffff,
-          alpha: 0.5,
+          alpha: 0.5 * vAlpha,
           join: "round",
           cap: "round",
         });
 
-        // Draw physical node points!
         if (wall.path) {
           wall.path.forEach((pt) => {
             const px = (Number(pt.x) - originX) * gridX;
@@ -539,7 +559,7 @@
       gfx.stroke({
         width: 5,
         color: 0x00f0ff,
-        alpha: 0.9,
+        alpha: 0.9 * vAlpha,
         join: "round",
         cap: "round",
       });
@@ -551,18 +571,18 @@
       let pColor = 0xffa500;
       if (portal.properties?.type === "window") pColor = 0x3b82f6;
       else if (portal.properties?.type === "secret") pColor = 0xa855f7;
+      const vAlpha = getVisAlpha(portal);
 
       if (selectedIds.has(portal.id)) {
         tracePath(gfx, portal.path, gridX, gridY, originX, originY);
         gfx.stroke({
           width: 12,
           color: 0xffffff,
-          alpha: 0.5,
+          alpha: 0.5 * vAlpha,
           join: "round",
           cap: "round",
         });
 
-        // Draw physical node points!
         if (portal.path) {
           portal.path.forEach((pt) => {
             const px = (Number(pt.x) - originX) * gridX;
@@ -579,7 +599,7 @@
       gfx.stroke({
         width: 5,
         color: pColor,
-        alpha: 0.9,
+        alpha: 0.9 * vAlpha,
         join: "round",
         cap: "round",
       });
@@ -1157,7 +1177,6 @@
       }
     }
 
-    // === RESTORED & CORRECTED ALT/SHIFT VECTOR BINDS ===
     if (e.button === 2 && draftingPath.length === 0) {
       const coords = getGridCoordinates(
         e.clientX,
@@ -1168,7 +1187,6 @@
       const thresholdSq = (15 / scale / coords.gridX) ** 2;
 
       if (e.altKey) {
-        // ALT-RIGHT-CLICK = SPLIT VECTOR
         const splitOccurred = mapStore.splitVectorNode(
           coords.exactX,
           coords.exactY,
@@ -1176,7 +1194,6 @@
         );
         if (splitOccurred) return;
       } else if (e.shiftKey) {
-        // SHIFT-RIGHT-CLICK = DELETE NODE
         const nodeDeleted = mapStore.deleteVectorNode(
           coords.exactX,
           coords.exactY,
@@ -1186,8 +1203,7 @@
       }
     }
 
-    // Safety net: Also allow Alt-Left-Click to Delete Node
-    if (e.button === 0 && e.altKey && currentToolAction === "select") {
+    if (e.button === 0 && e.altKey && activeTool === "select") {
       const coords = getGridCoordinates(e.clientX, e.clientY, false, "select");
       const thresholdSq = (15 / scale / coords.gridX) ** 2;
       const nodeDeleted = mapStore.deleteVectorNode(
@@ -1281,7 +1297,6 @@
         };
         const candidates = mapStore.quadtree?.retrieve(searchRange) || [];
 
-        // 1. Prioritize hitting individual nodes first!
         const checkGeometryNodes = (items) => {
           for (const item of items) {
             if (!item.path) continue;
@@ -1292,7 +1307,7 @@
               if (distSq < minGridDistSq) {
                 minGridDistSq = distSq;
                 closestItem = item;
-                closestNodeIndex = i; // Save the specific node we hit!
+                closestNodeIndex = i;
               }
             }
           }
@@ -1304,7 +1319,6 @@
 
         draggedNodeIndex = closestNodeIndex;
 
-        // 2. If no node hit, check general entities and vector segments
         if (!closestItem) {
           const checkEntityCollision = (items, getPos) => {
             for (const item of items) {
@@ -1427,7 +1441,6 @@
       return;
     }
 
-    // --- GRID ALIGNMENT VISUALS ---
     if (isGridAligning) {
       const rect = canvasContainer.getBoundingClientRect();
       const rawX = e.clientX - rect.left;
@@ -1465,7 +1478,6 @@
       const dx = currentGridX - lastDragGrid.x;
       const dy = currentGridY - lastDragGrid.y;
 
-      // FIX: Move the specific single node if we grabbed one, otherwise move the whole path
       if (draggedNodeIndex !== null) {
         mapStore.updateSingleNodePosition(
           draggedItemId,
@@ -1495,10 +1507,9 @@
 
     isPanning = false;
     draggedItemId = null;
-    draggedNodeIndex = null; // Clear dragging state
+    draggedNodeIndex = null;
     lastDragGrid = null;
 
-    // --- COMMIT GRID ALIGNMENT BOX OR CLICK ---
     if (isGridAligning && alignBoxStart && alignBoxEnd) {
       const w = Math.abs(alignBoxEnd.x - alignBoxStart.x);
       const h = Math.abs(alignBoxEnd.y - alignBoxStart.y);

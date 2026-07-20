@@ -377,7 +377,7 @@
     </div>
 
     <div class="properties-panel">
-{#if displayCategory === "select"}
+    {#if displayCategory === "select"}
         <!-- SELECTION & CLIPBOARD ACTIONS -->
         <div class="panel-section" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.02);">
           <h3 style="color: #38bdf8;">✂️ CLIPBOARD</h3>
@@ -396,7 +396,32 @@
             </button>
           </div>
         </div>
+        <!-- SELECTED ITEM PROPERTIES -->
+        {#if mapStore.selectedItemIds.length > 0}
+          <div class="panel-section" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.02); margin-top: 12px;">
+            <h3 style="color: #f59e0b;">🎛️ SELECTED PROPERTIES ({mapStore.selectedItemIds.length})</h3>
+            
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px;">
+              Universal Visibility (Player View)
+              <select 
+                style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px;"
+                onchange={(e) => {
+                  mapStore.selectedItemIds.forEach(id => {
+                    mapStore.updateItemProperty(id, "properties.visibility", e.target.value);
+                  });
+                }}
+              >
+                <option value="visible">👁️ Visible to Everyone</option>
+                <option value="gm_only">🕵️ GM Only (Hidden from Players)</option>
+                <option value="hidden">🚫 Completely Disabled</option>
+              </select>
+            </label>
 
+            <p class="helper-text" style="margin-top: 8px; font-size: 10px;">
+              <strong>GM Only:</strong> VTTs will load this object for the GM, but never send it to connected players until triggered.
+            </p>
+          </div>
+        {/if}
         <div class="panel-section">
           <h3>💾 FILE & EXPORT</h3>
           <label class="checkbox-row" style="margin-bottom: 8px;">
@@ -1447,126 +1472,126 @@
               />
               <span>Set as Default Landing Zone</span>
             </label>
-          {:else if displayCategory === "event"}
-            <label>
-              <span>Event Name:</span>
-              <input
-                type="text"
-                value={activeConf.name || "New Event"}
-                oninput={(e) =>
-                  handlePropChange("event", "name", e.target.value)}
-              />
-            </label>
-            <label>
-              <span>Trigger Radius (Grid Tiles):</span>
-              <input
-                type="number"
-                step="0.5"
-                min="0.5"
-                value={activeConf.trigger_bounds?.radius ?? 0.5}
-                onchange={(e) =>
-                  handlePropChange(
-                    "event",
-                    "trigger_bounds.radius",
-                    parseFloat(e.target.value),
-                  )}
-              />
-            </label>
-            <label>
-              <span>Event Type:</span>
+        {:else if displayCategory === "event"}
+        <div class="panel-section" style="border-color: rgba(168, 85, 247, 0.4); background: rgba(168, 85, 247, 0.02);">
+          <h3 style="color: #a855f7;">📝 EVENT CONFIG</h3>
+          <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px;">
+            Trigger Type
+            <select 
+              style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px;"
+              value={selectedItem ? selectedItem.eventType : mapStore.defaultSettings.event.eventType}
+              onchange={(e) => {
+                if (selectedItem) mapStore.updateItemProperty(selectedItem.id, "eventType", e.target.value);
+                else mapStore.updateDefaultSetting("event", "eventType", e.target.value);
+              }}
+            >
+              <option value="Trap/Door Trigger">Trap/Door Trigger</option>
+              <option value="Teleport">Teleport</option>
+              <option value="Stairs/Ladder">Stairs/Ladder</option>
+              <option value="State Toggle">State Toggle (Reveal/Hide/Open)</option> 
+            </select>
+          </label>
+
+          {#if (selectedItem ? selectedItem.eventType : mapStore.defaultSettings.event.eventType) === "State Toggle"}
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+              Target Action
               <select
-                value={activeConf.eventType || "Trap/Door Trigger"}
-                onchange={(e) =>
-                  handlePropChange("event", "eventType", e.target.value)}
+                style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px;"
+                value={selectedItem ? selectedItem.target_action : mapStore.defaultSettings.event.target_action}
+                onchange={(e) => {
+                  if (selectedItem) mapStore.updateItemProperty(selectedItem.id, "target_action", e.target.value);
+                  else mapStore.updateDefaultSetting("event", "target_action", e.target.value);
+                }}
               >
-                <option value="Trap/Door Trigger">Trap/Door Trigger</option>
-                <option value="Teleport">Teleport</option>
-                <option value="Stairs/Ladder">Stairs/Ladder</option>
-              </select>
-            </label>
-            <label>
-              <span>Activation Method:</span>
-              <select
-                value={activeConf.activation || "proximity"}
-                onchange={(e) =>
-                  handlePropChange("event", "activation", e.target.value)}
-              >
-                <option value="proximity">Proximity (Walk Over)</option>
-                <option value="interaction">Interaction (Click to Use)</option>
-                <option value="locked">Locked (GM Only)</option>
+                <option value="toggle_visibility">Toggle Visibility (GM Only ↔ Visible)</option>
+                <option value="set_visible">Force Reveal (Set Visible)</option>
+                <option value="set_hidden">Force Hide (Set GM Only)</option>
+                <option value="toggle_portal">Toggle Door/Window (Open/Close)</option>
               </select>
             </label>
 
-            {#if activeConf.eventType === "Teleport" || activeConf.eventType === "Stairs/Ladder"}
-              <label>
-                <span>Destination (Spawn Point):</span>
-                <select
-                  value={activeConf.targetSpawnId || ""}
-                  onchange={(e) =>
-                    handlePropChange("event", "targetSpawnId", e.target.value)}
-                  disabled={activeConf.autoCreateMatch &&
-                    selectedItems.length === 0}
-                >
-                  <option value="">-- Select Destination --</option>
-                  {#each catalog as mapLevel}
-                    {#each mapLevel.manifest?.entities?.landing_zones || [] as spawn}
-                      <option value={spawn.id}
-                        >[{mapLevel.name || mapLevel.filename.split(".")[0]}] {spawn.name ||
-                          "Unnamed Spawn"}</option
-                      >
-                    {/each}
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+              Target Entities (Hold Ctrl/Cmd to Multi-Select)
+              <select
+                multiple
+                style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px; height: 110px;"
+                onchange={(e) => {
+                  const selectedOptions = Array.from(e.target.selectedOptions).map(opt => opt.value);
+                  if (selectedItem) mapStore.updateItemProperty(selectedItem.id, "target_entity_ids", selectedOptions);
+                  else mapStore.updateDefaultSetting("event", "target_entity_ids", selectedOptions);
+                }}
+              >
+                <optgroup label="Props / Tokens">
+                  {#each mapStore.activeMap?.manifest?.entities?.props || [] as prop}
+                    <option value={prop.id} selected={(selectedItem ? selectedItem.target_entity_ids : mapStore.defaultSettings.event.target_entity_ids)?.includes(prop.id)}>{prop.name || 'Unnamed Prop'}</option>
                   {/each}
-                </select>
-              </label>
+                </optgroup>
+                <optgroup label="Portals (Doors/Windows)">
+                  {#each mapStore.activeMap?.manifest?.geometry?.portals || [] as portal}
+                    <option value={portal.id} selected={(selectedItem ? selectedItem.target_entity_ids : mapStore.defaultSettings.event.target_entity_ids)?.includes(portal.id)}>{portal.properties?.type || 'Portal'} ({portal.id.substring(0,6)})</option>
+                  {/each}
+                </optgroup>
+                <optgroup label="Audio Zones">
+                  {#each mapStore.activeMap?.manifest?.entities?.audio?.zones || [] as audio}
+                    <option value={audio.id} selected={(selectedItem ? selectedItem.target_entity_ids : mapStore.defaultSettings.event.target_entity_ids)?.includes(audio.id)}>{audio.track || 'Unnamed Audio'}</option>
+                  {/each}
+                </optgroup>
+              </select>
+            </label>
 
-              {#if selectedItems.length === 0}
-                <div class="auto-match-panel">
-                  <label class="checkbox-row" style="margin-top: 0;">
-                    <input
-                      type="checkbox"
-                      checked={activeConf.autoCreateMatch || false}
-                      onchange={(e) =>
-                        handlePropChange(
-                          "event",
-                          "autoCreateMatch",
-                          e.target.checked,
-                        )}
-                    />
-                    <span style="color: #00f0ff; font-weight: bold;"
-                      >Full Reciprocal Auto-Match</span
-                    >
-                  </label>
-                  {#if activeConf.autoCreateMatch}
-                    <label style="margin-top: 8px;">
-                      <span>Target Floor:</span>
-                      <select
-                        value={activeConf.targetFloorId || ""}
-                        onchange={(e) =>
-                          handlePropChange(
-                            "event",
-                            "targetFloorId",
-                            e.target.value,
-                          )}
-                      >
-                        <option value="">-- Select Target Floor --</option>
-                        {#each catalog as mapLevel}
-                          <option value={mapLevel.id}
-                            >{mapLevel.filename}</option
-                          >
-                        {/each}
-                      </select>
-                    </label>
-                    <p
-                      class="helper-text"
-                      style="margin-top: 6px; font-size: 10px; color: #94a3b8;"
-                    >
-                      Placing an event will auto-generate paired stairs and safe
-                      return spawns on both floors instantly.
-                    </p>
+          {:else if ["Teleport", "Stairs/Ladder"].includes(selectedItem ? selectedItem.eventType : mapStore.defaultSettings.event.eventType)}
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+              Target Floor
+              <select 
+                style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px;"
+                value={selectedItem ? selectedItem.targetFloorId : mapStore.defaultSettings.event.targetFloorId}
+                onchange={(e) => {
+                  if (selectedItem) mapStore.updateItemProperty(selectedItem.id, "targetFloorId", e.target.value);
+                  else mapStore.updateDefaultSetting("event", "targetFloorId", e.target.value);
+                }}
+              >
+                <option value="">-- Same Floor --</option>
+                {#each mapStore.catalog as level}
+                  <option value={level.id}>{level.filename}</option>
+                {/each}
+              </select>
+            </label>
+            
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+              Destination Spawn Point
+              <select 
+                style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px;"
+                value={selectedItem ? selectedItem.targetSpawnId : mapStore.defaultSettings.event.targetSpawnId}
+                onchange={(e) => {
+                  if (selectedItem) mapStore.updateItemProperty(selectedItem.id, "targetSpawnId", e.target.value);
+                  else mapStore.updateDefaultSetting("event", "targetSpawnId", e.target.value);
+                }}
+              >
+                <option value="">-- Select Destination --</option>
+                {#each mapStore.catalog as level}
+                  {#if !selectedItem?.targetFloorId || selectedItem.targetFloorId === level.id || (!selectedItem && mapStore.defaultSettings.event.targetFloorId === level.id)}
+                    <optgroup label={level.filename}>
+                      {#each level.manifest.entities?.landing_zones || [] as spawn}
+                        <option value={spawn.id}>{spawn.name || 'Unnamed Spawn'}</option>
+                      {/each}
+                    </optgroup>
                   {/if}
-                </div>
-              {/if}
-            {/if}
+                {/each}
+              </select>
+            </label>
+            
+            <label class="checkbox-row" style="margin-top: 8px;">
+              <input type="checkbox" 
+                checked={selectedItem ? selectedItem.autoCreateMatch : mapStore.defaultSettings.event.autoCreateMatch}
+                onchange={(e) => {
+                  if (selectedItem) mapStore.updateItemProperty(selectedItem.id, "autoCreateMatch", e.target.checked);
+                  else mapStore.updateDefaultSetting("event", "autoCreateMatch", e.target.checked);
+                }}
+              />
+              <span>Auto-Create Return Spawn</span>
+            </label>
+          {/if}
+        </div>
           {:else if displayCategory === "audio"}
             <label>
               <span>Audio Track:</span>
