@@ -1116,6 +1116,7 @@ class MapStore {
         return nodeDeleted;
     }
 
+    // --- NEW LOGIC: Physically severing the path array into two separate geometric objects ---
     splitVectorNode(exactX, exactY, thresholdSq) {
         const activeMap = this.activeMap;
         if (!activeMap) return false;
@@ -1128,7 +1129,7 @@ class MapStore {
             for (let itemIdx = 0; itemIdx < newItems.length; itemIdx++) {
                 if (splitOccurred) continue;
                 const item = { ...newItems[itemIdx] };
-                if (!item.path) continue;
+                if (!item.path || item.path.length < 2) continue;
                 
                 for (let i = 0; i < item.path.length - 1; i++) {
                     const x1 = Number(item.path[i].x);
@@ -1144,17 +1145,34 @@ class MapStore {
                     const distSq = (exactX - projX) ** 2 + (exactY - projY) ** 2;
 
                     if (distSq < thresholdSq) {
-                        item.path = [...item.path];
-                        item.path.splice(i + 1, 0, { x: exactX, y: exactY });
+                        const splitPoint = { x: exactX, y: exactY };
                         
+                        // Array 1: Start to split point
+                        const path1 = [...item.path.slice(0, i + 1), splitPoint];
+                        // Array 2: Split point to end
+                        const path2 = [splitPoint, ...item.path.slice(i + 1)];
+
+                        // Update the original item to end at the split
+                        item.path = path1;
                         newItems[itemIdx] = item;
-                        splitOccurred = true;
+
+                        // Generate a brand new, detached object for the rest of the line
+                        const newItem = {
+                            id: crypto.randomUUID(),
+                            path: path2,
+                            properties: JSON.parse(JSON.stringify(item.properties)) // Deep copy properties
+                        };
+                        if (item.isBezier !== undefined) newItem.isBezier = item.isBezier;
+
+                        // Splice the new object directly after the old one
+                        newItems.splice(itemIdx + 1, 0, newItem);
                         
-                        activeMap.manifest.geometry[cat] = newItems; // Robust reassignment
-                        this.pushHistory("Split Vector");
+                        splitOccurred = true;
+                        activeMap.manifest.geometry[cat] = newItems;
+                        this.pushHistory("Cut Vector Segment");
                         this.updateSpatialIndex();
                         this.updateTrigger++;
-                        return; // breaks forEach iteration
+                        return; 
                     }
                 }
             }
@@ -1162,7 +1180,6 @@ class MapStore {
         return splitOccurred;
     }
 
-    // --- FIX: Dragging Single Nodes instead of the entire line ---
     updateSingleNodePosition(id, nodeIndex, exactX, exactY) {
         const activeMap = this.activeMap;
         if (!activeMap) return;
