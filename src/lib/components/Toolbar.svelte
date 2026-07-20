@@ -377,13 +377,16 @@
     </div>
 
     <div class="properties-panel">
-      {#if displayCategory === "select"}
-        <!-- SELECTION & CLIPBOARD ACTIONS -->
+      <!-- GLOBALLY ACCESSIBLE CLIPBOARD (Shows if items are selected OR if data is waiting to be pasted) -->
+      {#if mapStore.selectedItemIds.length > 0 || mapStore.clipboard.length > 0}
         <div
           class="panel-section"
-          style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.02);"
+          style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.02); margin-bottom: 16px;"
         >
-          <h3 style="color: #38bdf8;">✂️ CLIPBOARD</h3>
+          <h3 style="color: #38bdf8;">
+            ✂️ CLIPBOARD {#if mapStore.selectedItemIds.length > 0}({mapStore
+                .selectedItemIds.length} Selected){/if}
+          </h3>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
             <button
               class="action-btn"
@@ -423,6 +426,45 @@
             </button>
           </div>
         </div>
+      {/if}
+
+      <!-- SELECTED ITEM PROPERTIES (VISIBILITY - strictly requires active selection) -->
+      {#if mapStore.selectedItemIds.length > 0}
+        <div
+          class="panel-section"
+          style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.02); margin-bottom: 16px;"
+        >
+          <h3 style="color: #f59e0b;">🎛️ VISIBILITY OVERRIDE</h3>
+          <label
+            style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px;"
+          >
+            Universal Visibility (Player View)
+            <select
+              style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 4px; border-radius: 4px;"
+              onchange={(e) => {
+                mapStore.selectedItemIds.forEach((id) => {
+                  mapStore.updateItemProperty(
+                    id,
+                    "properties.visibility",
+                    e.target.value,
+                  );
+                });
+              }}
+            >
+              <option value="visible">👁️ Visible to Everyone</option>
+              <option value="gm_only">🕵️ GM Only (Hidden from Players)</option>
+              <option value="hidden">🚫 Completely Disabled</option>
+            </select>
+          </label>
+          <p class="helper-text" style="margin-top: 8px; font-size: 10px;">
+            <strong>GM Only:</strong> VTTs will load this object for the GM, but
+            never send it to connected players until triggered.
+          </p>
+        </div>
+      {/if}
+
+      <!-- SELECT / DEFAULT PANEL (File & Export, Map Levels, etc.) -->
+      {#if displayCategory === "select"}
         <!-- SELECTED ITEM PROPERTIES -->
         {#if mapStore.selectedItemIds.length > 0}
           <div
