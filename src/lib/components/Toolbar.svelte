@@ -519,13 +519,15 @@
               <h3 style="color: #a855f7;">🗺️ MAP LEVELS</h3>
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 {#each mapStore.catalog as level}
-                  <div style="display: flex; gap: 4px; align-items: center;">
-                    <!-- Switch Map Button -->
+                  <div
+                    style="display: flex; gap: 4px; align-items: center; width: 100%; min-width: 0;"
+                  >
                     <button
                       class="action-btn {mapStore.activeMapId === level.id
                         ? 'wave'
                         : ''}"
-                      style="flex: 1; border-color: {mapStore.activeMapId ===
+                      title={level.filename}
+                      style="flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; padding-right: 8px; display: block; border-color: {mapStore.activeMapId ===
                       level.id
                         ? '#a855f7'
                         : '#334155'}; color: {mapStore.activeMapId === level.id
@@ -536,11 +538,10 @@
                       {level.filename}
                     </button>
 
-                    <!-- Rename & Delete (Only show on active map) -->
                     {#if mapStore.activeMapId === level.id}
                       <button
                         class="action-btn"
-                        style="padding: 4px 8px;"
+                        style="padding: 4px 8px; flex-shrink: 0;"
                         title="Rename Level"
                         onclick={() => {
                           const newName = prompt(
@@ -554,7 +555,7 @@
 
                       <button
                         class="action-btn"
-                        style="padding: 4px 8px; color: #ef4444; border-color: rgba(239,68,68,0.3);"
+                        style="padding: 4px 8px; color: #ef4444; border-color: rgba(239,68,68,0.3); flex-shrink: 0;"
                         title="Delete Level"
                         onclick={() => {
                           if (confirm("Delete this level entirely?"))
