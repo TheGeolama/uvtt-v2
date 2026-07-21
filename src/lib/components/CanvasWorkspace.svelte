@@ -85,6 +85,57 @@
     console.log("Texture cache purged.");
   }
 
+  // --- GEOMETRY & TARGETING HELPER ---
+  // A universal helper to find the physical center of ANY entity or geometry line by its ID
+  function getEntityCenter(id, manifest) {
+    if (!id || !manifest) return null;
+
+    // Check Geometry Lines (Return the centroid of the vector path)
+    for (const cat of ["walls", "portals", "overhead"]) {
+      const item = manifest.geometry?.[cat]?.find((i) => i.id === id);
+      if (item && item.path && item.path.length > 0) {
+        let sumX = 0,
+          sumY = 0;
+        item.path.forEach((pt) => {
+          sumX += Number(pt.x);
+          sumY += Number(pt.y);
+        });
+        return { x: sumX / item.path.length, y: sumY / item.path.length };
+      }
+    }
+
+    // Check Point Entities
+    const prop = manifest.entities?.props?.find((i) => i.id === id);
+    if (prop) return { x: Number(prop.position.x), y: Number(prop.position.y) };
+
+    const light = manifest.entities?.lights?.find((i) => i.id === id);
+    if (light)
+      return { x: Number(light.position.x), y: Number(light.position.y) };
+
+    const audio = manifest.entities?.audio?.zones?.find((i) => i.id === id);
+    if (audio) return { x: Number(audio.center.x), y: Number(audio.center.y) };
+
+    const event = manifest.entities?.events?.find((i) => i.id === id);
+    if (event)
+      return {
+        x: Number(event.trigger_bounds.center.x),
+        y: Number(event.trigger_bounds.center.y),
+      };
+
+    const spawn = manifest.entities?.landing_zones?.find((i) => i.id === id);
+    if (spawn)
+      return {
+        x: Number(spawn.coordinates[0]),
+        y: Number(spawn.coordinates[1]),
+      };
+
+    const emitter = manifest.entities?.emitters?.find((i) => i.id === id);
+    if (emitter)
+      return { x: Number(emitter.position.x), y: Number(emitter.position.y) };
+
+    return null;
+  }
+
   // --- WINDOW RESIZE TRACKING ---
   let lastWindowWidth = 0;
   let lastWindowHeight = 0;
@@ -603,6 +654,63 @@
         join: "round",
         cap: "round",
       });
+    });
+
+    // --- NEW: EVENT TARGETING LINKS ---
+    const linkGfx = new PIXI.Graphics();
+    geometryContainer.addChild(linkGfx);
+
+    (manifest.entities?.events || []).forEach((evt) => {
+      if (selectedIds.has(evt.id)) {
+        const ex = (Number(evt.trigger_bounds?.center?.x) - originX) * gridX;
+        const ey = (Number(evt.trigger_bounds?.center?.y) - originY) * gridY;
+        if (isNaN(ex) || isNaN(ey)) return;
+
+        // 1. Draw dashed lines to Cross-Entity Targets (State Toggles)
+        if (evt.target_entity_ids && evt.target_entity_ids.length > 0) {
+          evt.target_entity_ids.forEach((tid) => {
+            const tCenter = getEntityCenter(tid, manifest);
+            if (tCenter) {
+              const tx = (tCenter.x - originX) * gridX;
+              const ty = (tCenter.y - originY) * gridY;
+
+              linkGfx.moveTo(ex, ey).lineTo(tx, ty);
+              linkGfx.stroke({
+                width: 2,
+                color: 0xa855f7,
+                alpha: 0.8,
+                dash: [8, 6],
+              });
+
+              linkGfx.circle(tx, ty, 8);
+              linkGfx.stroke({ width: 2, color: 0xa855f7, alpha: 1 });
+            }
+          });
+        }
+
+        // 2. Draw dashed lines to Teleport/Stairs Destination (If on the same map layer)
+        if (
+          evt.targetSpawnId &&
+          (!evt.targetFloorId || evt.targetFloorId === activeMap.id)
+        ) {
+          const tCenter = getEntityCenter(evt.targetSpawnId, manifest);
+          if (tCenter) {
+            const tx = (tCenter.x - originX) * gridX;
+            const ty = (tCenter.y - originY) * gridY;
+
+            linkGfx.moveTo(ex, ey).lineTo(tx, ty);
+            linkGfx.stroke({
+              width: 2,
+              color: 0x3b82f6,
+              alpha: 0.8,
+              dash: [8, 6],
+            });
+
+            linkGfx.circle(tx, ty, 8);
+            linkGfx.stroke({ width: 2, color: 0x3b82f6, alpha: 1 });
+          }
+        }
+      }
     });
 
     drawDraftingLayer();
