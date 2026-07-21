@@ -23,7 +23,12 @@ export function exportToFoundryVTT(manifest) {
         walls: [],
         lights: [],
         tokens: [],
-        notes: []
+        tiles: [],     // Added for Props
+        drawings: [],  // Added for Events
+        notes: [],
+        flags: {
+            uvtt: { version: 2 }
+        }
     };
 
     // Foundry Walls & Portals
@@ -53,12 +58,14 @@ export function exportToFoundryVTT(manifest) {
     processGeometry(manifest.geometry?.walls, "wall", 20, 20);
     processGeometry(manifest.geometry?.portals, "door", 20, 20);
 
-    // Foundry Lights
+    // Foundry Lights (Now respecting Universal Visibility)
     (manifest.entities?.lights || []).forEach(l => {
+        const isHidden = l.properties?.visibility === 'gm_only' || l.properties?.visibility === 'hidden';
         scene.lights.push({
             _id: sanitizeId(l.id),
             x: l.position.x * gridSize,
             y: l.position.y * gridSize,
+            hidden: isHidden,
             config: {
                 dim: l.properties.radius?.dim * (5 / (manifest.resolution?.units_per_grid || 5)), 
                 bright: l.properties.radius?.bright * (5 / (manifest.resolution?.units_per_grid || 5)),
@@ -78,6 +85,50 @@ export function exportToFoundryVTT(manifest) {
             x: lz.coordinates[0] * gridSize,
             y: lz.coordinates[1] * gridSize,
             hidden: true
+        });
+    });
+
+    // Foundry Tiles (Props)
+    (manifest.entities?.props || []).forEach(prop => {
+        const isHidden = prop.properties?.visibility === 'gm_only' || prop.properties?.visibility === 'hidden';
+        const width = (Number(prop.scale) / 100) * gridSize;
+        scene.tiles.push({
+            _id: sanitizeId(prop.id),
+            texture: { src: prop.image },
+            width: width,
+            height: width,
+            x: (prop.position.x * gridSize) - (width / 2),
+            y: (prop.position.y * gridSize) - (width / 2),
+            rotation: Number(prop.rotation) || 0,
+            hidden: isHidden,
+            flags: { uvtt: { original_visibility: prop.properties?.visibility } }
+        });
+    });
+
+    // Foundry Drawings (Events and Smart States)
+    (manifest.entities?.events || []).forEach(evt => {
+        const radiusPx = (Number(evt.trigger_bounds?.radius) || 1) * gridSize;
+        const cx = evt.trigger_bounds?.center?.x * gridSize;
+        const cy = evt.trigger_bounds?.center?.y * gridSize;
+
+        scene.drawings.push({
+            _id: sanitizeId(evt.id),
+            text: evt.name || "Trigger Zone",
+            shape: { type: "e", width: radiusPx * 2, height: radiusPx * 2 },
+            x: cx - radiusPx,
+            y: cy - radiusPx,
+            hidden: true, // Events are inherently invisible to players
+            flags: {
+                uvtt: {
+                    type: "event",
+                    eventType: evt.eventType,
+                    activation: evt.activation,
+                    target_action: evt.target_action,
+                    target_entity_ids: evt.target_entity_ids || [],
+                    targetFloorId: evt.targetFloorId || "",
+                    targetSpawnId: evt.targetSpawnId || ""
+                }
+            }
         });
     });
 
@@ -154,6 +205,46 @@ export function exportToRoll20(manifest) {
             width: gridSize,
             height: gridSize,
             name: lz.name || "Spawn"
+        });
+    });
+
+    // Roll20 Props (Layer routing based on visibility override)
+    (manifest.entities?.props || []).forEach(prop => {
+        const isGMOnly = prop.properties?.visibility === 'gm_only' || prop.properties?.visibility === 'hidden';
+        const width = (Number(prop.scale) / 100) * gridSize;
+        
+        roll20Data.objects.push({
+            type: "graphic",
+            layer: isGMOnly ? "gmlayer" : "objects",
+            imgsrc: prop.image,
+            width: width,
+            height: width,
+            rotation: Number(prop.rotation) || 0,
+            top: toPx(prop.position.y),
+            left: toPx(prop.position.x),
+            gmnotes: encodeURIComponent(JSON.stringify({ uvtt_id: prop.id, visibility: prop.properties?.visibility }))
+        });
+    });
+
+    // Roll20 Events (Pushed to GM Layer with API metadata injected into gmnotes)
+    (manifest.entities?.events || []).forEach(evt => {
+        const cx = toPx(evt.trigger_bounds?.center?.x || 0);
+        const cy = toPx(evt.trigger_bounds?.center?.y || 0);
+        
+        roll20Data.objects.push({
+            type: "graphic",
+            layer: "gmlayer",
+            name: evt.name || "Trigger",
+            top: cy,
+            left: cx,
+            width: 70, height: 70, // Standard marker size for Roll20
+            aura1_radius: Number(evt.trigger_bounds?.radius) || 1,
+            gmnotes: encodeURIComponent(JSON.stringify({
+                type: "uvtt_event",
+                eventType: evt.eventType,
+                target_action: evt.target_action,
+                target_entity_ids: evt.target_entity_ids || []
+            }))
         });
     });
 
