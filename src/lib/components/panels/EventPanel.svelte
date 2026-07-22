@@ -364,6 +364,10 @@
   {/if}
 
   {#if activeConf.eventType === "Teleport" || activeConf.eventType === "Stairs/Ladder"}
+    {@const targetLevel = mapStore.catalog.find(
+      (m) => m.id === (activeConf.targetFloorId || mapStore.activeMapId),
+    )}
+
     {#if mapStore.selectedItemIds.length === 0}
       <label class="checkbox-row">
         <input
@@ -401,9 +405,6 @@
             handlePropChange("event", "targetSpawnId", e.target.value)}
         >
           <option value="">-- Select Spawn --</option>
-          {@const targetLevel = mapStore.catalog.find(
-            (m) => m.id === (activeConf.targetFloorId || mapStore.activeMapId),
-          )}
           {#each targetLevel?.manifest?.entities?.landing_zones || [] as spawn}
             <option value={spawn.id}>{spawn.name || "Unnamed Spawn"}</option>
           {/each}
