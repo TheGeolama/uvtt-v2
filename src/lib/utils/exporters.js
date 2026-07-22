@@ -407,7 +407,8 @@ export async function buildUVTT2Archive(catalog, audioBlobs = {}) {
             landing_zones: [],
             events: [],
             audio: { zones: [] },
-            emitters: []
+            emitters: [],
+            props: [] // FIX: Ensured props array exists for the archive
         };
 
         (m.entities?.lights || []).forEach(l => {
@@ -522,6 +523,25 @@ export async function buildUVTT2Archive(catalog, audioBlobs = {}) {
             }
             
             entitiesPayload.emitters.push(emitterObj);
+        });
+
+        // FIX: Inject Props into the Archive
+        (m.entities?.props || []).forEach(prop => {
+            entitiesPayload.props.push({
+                id: prop.id,
+                name: prop.name || "Prop",
+                image: prop.image || "",
+                position: { 
+                    x: prop.position?.x || 0.0, 
+                    y: prop.position?.y || 0.0, 
+                    z: prop.position?.z || 0.0 
+                },
+                rotation: Number(prop.rotation) || 0.0,
+                scale: Number(prop.scale) || 100.0,
+                properties: {
+                    visibility: prop.properties?.visibility || 'visible'
+                }
+            });
         });
 
         // Write map data into Zip layout
