@@ -84,7 +84,10 @@ export class SpatialAudioEngine {
     return t > 0 && t < 1 && u > 0 && u < 1;
   }
 
-  _isOccluded(lx, ly, ex, ey, geometry) {
+  // Upgraded to return an Intersection Count rather than a simple Boolean
+  _getOcclusionCount(lx, ly, ex, ey, geometry) {
+    let intersections = 0;
+
     // 1. Check Walls
     const walls = geometry?.walls || [];
     for (const wall of walls) {
@@ -97,7 +100,7 @@ export class SpatialAudioEngine {
         const p1 = wall.path[i];
         const p2 = wall.path[i+1];
         if (this._linesIntersect(lx, ly, ex, ey, p1.x, p1.y, p2.x, p2.y)) {
-          return true; // Raycast hit a solid wall
+          intersections++;
         }
       }
     }
@@ -115,12 +118,12 @@ export class SpatialAudioEngine {
         const p1 = portal.path[i];
         const p2 = portal.path[i+1];
         if (this._linesIntersect(lx, ly, ex, ey, p1.x, p1.y, p2.x, p2.y)) {
-          return true; // Raycast hit a closed door/window
+          intersections++;
         }
       }
     }
 
-    return false;
+    return intersections;
   }
 
   /**
@@ -173,16 +176,19 @@ export class SpatialAudioEngine {
       let panValue = dx / fadeRadius; 
       panValue = Math.max(-1, Math.min(1, panValue));
 
-      // 3. Occlusion Math (Acoustic Muffling via Lowpass Filter AND Volume Drop)
-      const isMuffled = (zone.muffledByWalls ?? true) && this._isOccluded(listenerX, listenerY, ex, ey, geometry);
-      const targetFrequency = isMuffled ? 600 : 22050; // 600Hz simulates hearing through a heavy door
+      // 3. Occlusion Math (Acoustic Layer Penetration)
+      const shouldMuffle = zone.muffledByWalls ?? true;
+      const occlusionCount = shouldMuffle ? this._getOcclusionCount(listenerX, listenerY, ex, ey, geometry) : 0;
+      
+      // Apply Lowpass filter if it hits AT LEAST one wall
+      const targetFrequency = occlusionCount > 0 ? 600 : 22050; 
 
-      // Apply a heavy volume penalty for shooting straight through a wall or closed window
-      if (isMuffled) {
-        targetVolume *= 0.25; // 75% volume reduction
+      // Apply Exponential Volume Penalty (25% volume remaining per wall punched through)
+      if (occlusionCount > 0) {
+        targetVolume *= Math.pow(0.25, occlusionCount); 
       }
 
-      // If out of range (or muffled to absolute zero), stop the Web Audio node completely to save CPU
+      // If out of range (or exponentially muffled to absolute zero), stop the Web Audio node completely to save CPU
       if (targetVolume <= 0.01) {
         if (this.activeNodes.has(zone.id)) {
           this.stopZone(zone.id);
