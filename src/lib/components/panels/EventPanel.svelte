@@ -16,7 +16,6 @@
     const tool = mapStore.activeTool;
     if (!ids || ids.length === 0)
       return { cat: tool, data: mapStore.defaultSettings[tool] || {} };
-
     const id = ids[0];
     const m = mapStore.activeMap?.manifest;
     if (!m) return { cat: tool, data: {} };
@@ -35,7 +34,6 @@
       return { cat: "prop", data: item };
     if ((item = m.entities?.events?.find((i) => i.id === id)))
       return { cat: "event", data: item };
-
     // Geometry
     if ((item = m.geometry?.walls?.find((i) => i.id === id)))
       return { cat: "wall", data: item };
@@ -43,7 +41,6 @@
       return { cat: "portal", data: item };
     if ((item = m.geometry?.overhead?.find((i) => i.id === id)))
       return { cat: "roof", data: item };
-
     return { cat: tool, data: mapStore.defaultSettings[tool] || {} };
   }
 
@@ -51,7 +48,6 @@
     let _ = mapStore.updateTrigger;
     return getSelectionContext();
   });
-
   let displayCategory = $derived(ctx.cat);
   let activeConf = $derived(ctx.data);
 </script>

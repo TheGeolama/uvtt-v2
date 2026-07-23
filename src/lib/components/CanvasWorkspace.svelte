@@ -11,9 +11,9 @@
 
   let canvasContainer;
   let pixiApp;
-  let viewportContainer = $state();
+  let viewportContainer = $state.raw();
   let mapSprite;
-  let overlayContainer = $state();
+  let overlayContainer = $state.raw();
 
   // --- REACTIVE VIEWPORT STATE ---
   let scale = $state(1);
@@ -46,7 +46,6 @@
   let isSpacePressed = $state(false);
   let isPixiReady = $state(false);
   let isDraggingVisionToken = $state(false);
-
   // Coordinate HUD is now hidden by default
   let showGridHUD = $state(false);
 
@@ -76,6 +75,7 @@
     pixiApp.canvas.style.position = "absolute";
     pixiApp.canvas.style.top = "0";
     pixiApp.canvas.style.left = "0";
+
     pixiApp.canvas.style.zIndex = "1";
     canvasContainer.appendChild(pixiApp.canvas);
 
@@ -160,12 +160,14 @@
 
   function applyOffsetsAndScale(manifest) {
     if (!mapSprite || mapSprite.texture === PIXI.Texture.EMPTY) return;
+
     const res = manifest.resolution;
     const gridX = Number(res.pixels_per_grid) || 70;
     const gridY = Number(res.pixels_per_grid_y) || gridX;
 
     mapSprite.width = res.map_size[0] * gridX;
     mapSprite.height = res.map_size[1] * gridY;
+
     mapSprite.position.set(
       Number(res.map_offset_x) || 0,
       Number(res.map_offset_y) || 0,
@@ -184,6 +186,7 @@
     const cw = window.innerWidth;
     const ch = window.innerHeight;
     scale = Math.min((cw - 100) / mapWidth, (ch - 100) / mapHeight, 1);
+
     panX = (cw - mapWidth * scale) / 2;
     panY = (ch - mapHeight * scale) / 2;
 
@@ -204,11 +207,13 @@
 
     for (const wall of walls) {
       if (!wall.path || wall.path.length < 2) continue;
+
       for (let i = 0; i < wall.path.length - 1; i++) {
         const x1 = Number(wall.path[i].x);
         const y1 = Number(wall.path[i].y);
         const x2 = Number(wall.path[i + 1].x);
         const y2 = Number(wall.path[i + 1].y);
+
         const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
         if (l2 === 0) continue;
 
@@ -216,8 +221,10 @@
           0,
           Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2),
         );
+
         const projX = x1 + t * (x2 - x1);
         const projY = y1 + t * (y2 - y1);
+
         const distSq = (px - projX) ** 2 + (py - projY) ** 2;
 
         if (distSq < closestDist) {
@@ -237,10 +244,12 @@
     const manifest = activeMap.manifest;
     const gridX = Number(manifest.resolution?.pixels_per_grid) || 70;
     const gridY = Number(manifest.resolution?.pixels_per_grid_y) || gridX;
+
     const unitsPerGrid = Math.max(
       1,
       Number(manifest.resolution?.units_per_grid) || 5,
     );
+
     const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
     const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
 
@@ -272,9 +281,11 @@
     }
 
     const effectiveAction = draggedCategory || currentToolAction;
+
     const isFreeTool = ["light", "audio", "emitter", "prop"].includes(
       effectiveAction,
     );
+
     const isCenterSnapTool = ["spawn", "event"].includes(effectiveAction);
     const shouldSnap = isFreeTool ? e_shiftKey : !e_shiftKey;
 
@@ -289,6 +300,7 @@
         manifest.geometry?.walls || [],
         0.5 / unitsPerGrid,
       );
+
       if (edgeSnap) {
         snapX = edgeSnap.x;
         snapY = edgeSnap.y;
@@ -324,6 +336,7 @@
 
     const dataStr = e.dataTransfer.getData("application/json");
     if (!dataStr) return;
+
     try {
       const data = JSON.parse(dataStr);
       if (data.type === "asset_prop") {
@@ -342,6 +355,7 @@
       const distSq =
         (coords.exactX - vision.token.x) ** 2 +
         (coords.exactY - vision.token.y) ** 2;
+
       if (distSq < 1.0) {
         isDraggingVisionToken = true;
         return;
@@ -355,7 +369,9 @@
         false,
         activeTool,
       );
+
       const thresholdSq = (15 / scale / coords.gridX) ** 2;
+
       if (e.altKey) {
         if (mapStore.splitVectorNode(coords.exactX, coords.exactY, thresholdSq))
           return;
@@ -369,6 +385,7 @@
 
     if (e.button === 0 && e.altKey && activeTool === "select") {
       const coords = getGridCoordinates(e.clientX, e.clientY, false, "select");
+
       if (
         mapStore.deleteVectorNode(
           coords.exactX,
@@ -422,6 +439,7 @@
         e.shiftKey,
         currentToolAction,
       );
+
       currentGridX = coords.snapX;
       currentGridY = coords.snapY;
 
@@ -446,6 +464,7 @@
         let closestItem = null,
           closestNodeIndex = null;
         let minGridDistSq = (15 / scale / coords.gridX) ** 2;
+
         const candidates =
           mapStore.quadtree?.retrieve({
             x: coords.exactX - 1,
@@ -482,6 +501,7 @@
               if (!candidates.find((c) => c.id === item.id)) return;
               const pos = getPos(item);
               if (!pos || isNaN(pos.x) || isNaN(pos.y)) return;
+
               const distSq =
                 (coords.exactX - pos.x) ** 2 + (coords.exactY - pos.y) ** 2;
               if (distSq < minGridDistSq) {
@@ -501,6 +521,7 @@
                   y2 = Number(item.path[i + 1].y);
                 const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
                 if (l2 === 0) continue;
+
                 let t = Math.max(
                   0,
                   Math.min(
@@ -580,7 +601,6 @@
       e.shiftKey,
       currentToolAction,
     );
-
     mapStore.mouseX = coords.exactX.toFixed(2);
     mapStore.mouseY = coords.exactY.toFixed(2);
 
@@ -688,6 +708,7 @@
           const p = getPos(item);
           if (p && inBox(p.x, p.y)) hits.push(item.id);
         });
+
       const checkGeometries = (items) =>
         items.forEach((item) => {
           if (
@@ -701,26 +722,32 @@
         x: Number(i.position?.x),
         y: Number(i.position?.y),
       }));
+
       checkEntities(manifest.entities?.audio?.zones || [], (i) => ({
         x: Number(i.center?.x),
         y: Number(i.center?.y),
       }));
+
       checkEntities(manifest.entities?.events || [], (i) => ({
         x: Number(i.trigger_bounds?.center?.x),
         y: Number(i.trigger_bounds?.center?.y),
       }));
+
       checkEntities(manifest.entities?.landing_zones || [], (i) => ({
         x: Number(i.coordinates?.[0]),
         y: Number(i.coordinates?.[1]),
       }));
+
       checkEntities(manifest.entities?.emitters || [], (i) => ({
         x: Number(i.position?.x),
         y: Number(i.position?.y),
       }));
+
       checkEntities(manifest.entities?.props || [], (i) => ({
         x: Number(i.position?.x),
         y: Number(i.position?.y),
       }));
+
       checkGeometries(manifest.geometry?.walls || []);
       checkGeometries(manifest.geometry?.portals || []);
       checkGeometries(manifest.geometry?.overhead || []);
@@ -737,8 +764,10 @@
     const rect = canvasContainer.getBoundingClientRect();
     const pointerX = e.clientX - rect.left;
     const pointerY = e.clientY - rect.top;
+
     const zoom = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = scale * zoom;
+
     panX = pointerX - (pointerX - panX) * (newScale / scale);
     panY = pointerY - (pointerY - panY) * (newScale / scale);
     scale = newScale;
@@ -748,6 +777,7 @@
 
   function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
     if (e.code === "Space") {
       e.preventDefault();
       isSpacePressed = true;
