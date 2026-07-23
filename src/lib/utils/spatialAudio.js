@@ -183,13 +183,18 @@ export class SpatialAudioEngine {
       // Apply Lowpass filter if it hits AT LEAST one wall
       const targetFrequency = occlusionCount > 0 ? 600 : 22050; 
 
-      // Apply Exponential Volume Penalty (25% volume remaining per wall punched through)
-      if (occlusionCount > 0) {
-        targetVolume *= Math.pow(0.25, occlusionCount); 
+      // Apply Custom Tiered Volume Penalty
+      if (occlusionCount === 1) {
+        targetVolume *= 0.20; // 20% volume remaining
+      } else if (occlusionCount === 2) {
+        targetVolume *= 0.05; // 5% volume remaining
+      } else if (occlusionCount >= 3) {
+        targetVolume *= 0.01; // 1% volume remaining
       }
 
-      // If out of range (or exponentially muffled to absolute zero), stop the Web Audio node completely to save CPU
-      if (targetVolume <= 0.01) {
+      // If out of range (or muffled to absolute zero), stop the Web Audio node completely to save CPU
+      // Threshold lowered to < 0.005 so the 3rd wall (0.01) audio survives the cull
+      if (targetVolume < 0.005) {
         if (this.activeNodes.has(zone.id)) {
           this.stopZone(zone.id);
         }
