@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { mapStore } from "$lib/stores/mapStore.svelte.js";
   import { upgradeLegacyMap } from "$lib/utils/legacyParser.js";
+  import { audioEngine } from "$lib/utils/spatialAudio.js";
   import * as PIXI from "pixi.js";
   import GridLayer from "./canvas/GridLayer.svelte";
   import GeometryLayer from "./canvas/GeometryLayer.svelte";
@@ -99,8 +100,11 @@
     if (pixiApp) {
       pixiApp.destroy(true);
     }
+    // Shut down active nodes to prevent memory/audio leaks when switching away
+    audioEngine.stopAll();
   });
 
+  // --- MAP LOADING & RENDERING EFFECT ---
   $effect(() => {
     const tick = mapStore.redrawTick;
     if (!isPixiReady || !activeMap) return;
@@ -114,6 +118,45 @@
     }
 
     applyOffsetsAndScale(safeManifest);
+  });
+
+  // --- REAL-TIME SPATIAL AUDIO EFFECT ---
+  $effect(() => {
+    // We bind explicitly to these runes. If any of them change, this effect instantly re-fires.
+    const tick = mapStore.updateTrigger;
+    const px = panX;
+    const py = panY;
+    const s = scale;
+
+    if (!isPixiReady || !activeMap) return;
+
+    const manifest = activeMap.manifest;
+    const audioZones = manifest.entities?.audio?.zones || [];
+    const walls = manifest.geometry?.walls || [];
+    const audioBlobs = mapStore.audioBlobs || {};
+
+    let listenerX = 0;
+    let listenerY = 0;
+
+    if (vision?.enabled && vision.token) {
+      // PLAYER PREVIEW MODE: Listen from the selected token's exact coordinates
+      listenerX = vision.token.x;
+      listenerY = vision.token.y;
+    } else {
+      // GM MODE: Calculate the exact center of the current camera viewport
+      const gridX = Number(manifest.resolution?.pixels_per_grid) || 70;
+      const gridY = Number(manifest.resolution?.pixels_per_grid_y) || gridX;
+      const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
+      const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
+
+      const cw = window.innerWidth;
+      const ch = window.innerHeight;
+
+      listenerX = (cw / 2 - px) / s / gridX + originX;
+      listenerY = (ch / 2 - py) / s / gridY + originY;
+    }
+
+    audioEngine.syncZones(audioZones, audioBlobs, listenerX, listenerY, walls);
   });
 
   function handleResize() {
@@ -349,6 +392,14 @@
 
   function handlePointerDown(e) {
     if (!viewportContainer || !activeMap) return;
+
+    // AUDIO ENGINE INIT
+    // Browsers strictly block Web Audio until the user clicks/interacts with the page
+    if (!audioEngine.isInitialized) {
+      audioEngine.init();
+    } else {
+      audioEngine.resume();
+    }
 
     if (e.button === 0 && vision?.enabled) {
       const coords = getGridCoordinates(e.clientX, e.clientY, false, "select");
