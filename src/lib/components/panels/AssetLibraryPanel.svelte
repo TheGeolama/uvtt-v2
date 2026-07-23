@@ -11,20 +11,52 @@
   // Dynamically extract unique top-level folders (Genres) from the loaded assets
   let availableGenres = $derived.by(() => {
     const genres = new Set();
-    const extractGenre = (item) => {
-      // Fallback to name if path isn't explicitly provided by the Go struct
-      const pathString = item.path || item.name || "";
-      const cleanPath = pathString.replace(/^[/\\]/, "");
-      const parts = cleanPath.split(/[/\\]/);
+    const allAssets = [
+      ...(mapStore.globalAssets?.audio || []),
+      ...(mapStore.globalAssets?.images || []),
+    ];
 
-      // If the file is inside a subfolder, treat that top-level folder as the Genre
-      if (parts.length > 1) {
-        genres.add(parts[0]);
+    if (allAssets.length === 0) return [];
+
+    // Normalize paths to forward slashes
+    const paths = allAssets.map((a) =>
+      (a.path || a.name || "").replace(/\\/g, "/"),
+    );
+
+    // Find the common root directory across ALL loaded assets
+    const splitPaths = paths.map((p) => p.split("/"));
+    let common = [];
+    for (let i = 0; i < splitPaths[0].length - 1; i++) {
+      const part = splitPaths[0][i];
+      if (splitPaths.every((p) => p.length > i && p[i] === part)) {
+        common.push(part);
+      } else {
+        break;
       }
-    };
+    }
+    const prefix = common.join("/") + (common.length > 0 ? "/" : "");
 
-    (mapStore.globalAssets?.audio || []).forEach(extractGenre);
-    (mapStore.globalAssets?.images || []).forEach(extractGenre);
+    // Known top-level asset directories (so we don't accidentally list 'Props' as a genre)
+    const rootFolders = ["Audio", "Maps", "Props", "Tokens"];
+
+    allAssets.forEach((item) => {
+      const fullPath = (item.path || item.name || "").replace(/\\/g, "/");
+      // Strip the absolute root path to get the relative folder structure
+      const relativePath = fullPath.startsWith(prefix)
+        ? fullPath.slice(prefix.length)
+        : fullPath;
+      const parts = relativePath.split("/");
+
+      if (parts.length > 1) {
+        // If the first folder is an asset category, the Genre is the NEXT folder
+        if (rootFolders.includes(parts[0]) && parts.length > 2) {
+          genres.add(parts[1]);
+        } else {
+          // Otherwise, treat the first relative folder as the Genre
+          genres.add(parts[0]);
+        }
+      }
+    });
 
     return Array.from(genres).sort();
   });
@@ -44,24 +76,16 @@
   let filteredAudio = $derived(
     (mapStore.globalAssets?.audio || []).filter((a) => {
       if (selectedGenre === "All") return true;
-      const pathString = a.path || a.name || "";
-      const cleanPath = pathString.replace(/^[/\\]/, "");
-      return (
-        cleanPath.startsWith(selectedGenre + "/") ||
-        cleanPath.startsWith(selectedGenre + "\\")
-      );
+      const normalized = (a.path || a.name || "").replace(/\\/g, "/");
+      return normalized.includes(`/${selectedGenre}/`);
     }),
   );
 
   let filteredImages = $derived(
     (mapStore.globalAssets?.images || []).filter((img) => {
       if (selectedGenre === "All") return true;
-      const pathString = img.path || img.name || "";
-      const cleanPath = pathString.replace(/^[/\\]/, "");
-      return (
-        cleanPath.startsWith(selectedGenre + "/") ||
-        cleanPath.startsWith(selectedGenre + "\\")
-      );
+      const normalized = (img.path || img.name || "").replace(/\\/g, "/");
+      return normalized.includes(`/${selectedGenre}/`);
     }),
   );
 </script>
@@ -103,7 +127,10 @@
         >
           {#each filteredAudio as aud}
             <li title={aud.name || aud.path}>
-              {(aud.name || aud.path || "Audio Track").split(/[/\\]/).pop()}
+              {(aud.name || aud.path || "Audio Track")
+                .replace(/\\/g, "/")
+                .split("/")
+                .pop()}
             </li>
           {/each}
         </ul>
@@ -120,7 +147,8 @@
         >
           {#each filteredImages as img}
             {@const filename = (img.name || img.path || "Prop")
-              .split(/[/\\]/)
+              .replace(/\\/g, "/")
+              .split("/")
               .pop()}
             <img
               src={img.data}
