@@ -23,7 +23,7 @@
 
   let hotkeyHint = $derived.by(() => {
     if (visionEnabled) {
-      return "<span class='key'>Left-Click & Drag:</span> Move Vision Token <span class='sep'>|</span> <span class='key'>Space+Drag:</span> Pan Camera";
+      return "🎭 <span style='color: #4ade80; font-weight: bold;'>PLAYER PREVIEW ACTIVE</span> <span class='sep'>|</span> <span class='key'>Left-Click & Drag:</span> Move Vision Token <span class='sep'>|</span> <span class='key'>Space+Drag:</span> Pan Camera";
     }
 
     switch (activeTool) {
@@ -81,7 +81,6 @@
       })
       .filter(Boolean),
   );
-
   let displayCategory = $derived(
     selectedItems.length > 0 ? selectedItems[0].category : activeTool,
   );
@@ -113,7 +112,6 @@
 </script>
 
 {#if activeMap}
-  <!-- Always-Visible Level Navigation Bar (Top Center) -->
   <div class="level-nav-bar">
     <div class="level-controls">
       <span class="icon" title="Compound Dungeon">🌍</span>
@@ -136,7 +134,6 @@
 
       <div class="divider"></div>
 
-      <!-- UNDO / REDO BUTTONS -->
       <button
         class="icon-btn"
         disabled={!activeMap.history || activeMap.historyIndex <= 0}
@@ -189,7 +186,6 @@
     </div>
   </div>
 
-  <!-- LEFT TOOLBAR (Tools & Context Properties) -->
   <div class="toolbar-wrapper">
     <div class="tool-selector">
       <div class="tool-group">
@@ -287,21 +283,19 @@
           onclick={() => mapStore.toggleLightingPreview()}
           aria-label="Toggle Lighting Preview"
         >
-          <span>🌓</span> Preview
+          <span>🌓</span> Lighting
         </button>
         <button
-          class:active={visionEnabled}
+          class:active-player={visionEnabled}
           onclick={() => mapStore.toggleVision()}
-          aria-label="Toggle Vision Sandbox"
+          aria-label="Toggle Player Preview"
         >
-          <span>👁️</span> Vision
+          <span>👁️</span> Player View
         </button>
       </div>
     </div>
 
-    <!-- LEFT CONTEXTUAL PROPERTIES PANEL -->
     <div class="properties-panel">
-      <!-- GLOBALLY ACCESSIBLE CLIPBOARD -->
       {#if mapStore.selectedItemIds.length > 0 || mapStore.clipboard.length > 0}
         <div
           class="panel-section"
@@ -352,7 +346,6 @@
         </div>
       {/if}
 
-      <!-- SELECTED ITEM PROPERTIES (VISIBILITY) -->
       {#if mapStore.selectedItemIds.length > 0}
         <div
           class="panel-section"
@@ -387,7 +380,6 @@
         </div>
       {/if}
 
-      <!-- PANEL ROUTING -->
       {#if displayCategory === "select"}
         {#if selectedItems.length === 0}
           <div class="panel-section">
@@ -458,14 +450,12 @@
     </div>
   </div>
 
-  <!-- RIGHT TOOLBAR (Global State Panels) -->
   <div class="global-panel-right">
     <FileExportPanel />
     <HistoryPanel />
     <MapSettingsPanel />
   </div>
 
-  <!-- CAD STATUS BAR -->
   <div class="status-bar">
     <div class="status-segment coord-readout">X: {mouseX} | Y: {mouseY}</div>
     <div class="status-segment zoom-readout">Zoom: {zoomScale}%</div>
@@ -735,6 +725,13 @@
     background: #00f0ff22;
     border-color: #00f0ff;
     color: #00f0ff;
+  }
+
+  /* Player Preview Active State */
+  button.active-player {
+    background: #22c55e22;
+    border-color: #22c55e;
+    color: #4ade80;
   }
 
   .action-btn {
