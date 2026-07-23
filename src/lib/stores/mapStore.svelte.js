@@ -42,6 +42,8 @@ class MapStore {
 
     // --- GLOBAL ASSET LIBRARY ---
     globalAssets = $state({ images: [], audio: [] });
+    mountedAssetDirectory = $state("");
+    _wailsRetryCount = 0;
 
     _saveTimeout = null;
 
@@ -71,6 +73,9 @@ class MapStore {
                 this.updateTrigger++;
             }
         });
+
+        // Initialize the auto-mount sequence for Wails
+        this.initGlobalAssets();
     }
 
     get activeMap() { return this.catalog.find(m => m.id === this.activeMapId) || null; }
@@ -1144,34 +1149,59 @@ class MapStore {
     }
 
     // --- GLOBAL ASSET LIBRARY BRIDGE ---
-    async mountAssetLibrary() {
-        if (window.go && window.go.main && window.go.main.App && window.go.main.App.SelectAssetDirectory) {
-            try {
-                const assets = await window.go.main.App.SelectAssetDirectory();
-                if (assets && assets.length > 0) {
-                    const images = assets.filter(a => a.type === 'image');
-                    const audio = assets.filter(a => a.type === 'audio');
-                    this.globalAssets = { images, audio };
 
-                    const audioPromises = audio.map(async (a) => {
-                        try {
-                            const res = await fetch(a.data);
-                            const blob = await res.blob();
-                            this.audioBlobs[a.name] = blob;
-                        } catch (e) {
-                            console.error(`Failed to fetch local audio: ${a.name}`);
-                        }
-                    });
-                    
-                    await Promise.all(audioPromises);
-                    this.updateTrigger++;
-                }
+    // Automatically called on startup to wake up the saved directory
+    async initGlobalAssets() {
+        if (typeof window !== 'undefined' && window.go?.main?.App?.LoadSavedAssetDirectory) {
+            try {
+                const payload = await window.go.main.App.LoadSavedAssetDirectory();
+                this.processAssetPayload(payload);
+            } catch (err) {
+                console.error("Auto-mount failed:", err);
+            }
+        } else if (this._wailsRetryCount < 10) {
+            // Wails bindings occasionally inject a fraction of a second after Svelte boots.
+            // This safely retries a few times before giving up if we are in a normal browser.
+            this._wailsRetryCount++;
+            setTimeout(() => this.initGlobalAssets(), 200);
+        }
+    }
+
+    async mountAssetLibrary() {
+        if (typeof window !== 'undefined' && window.go?.main?.App?.SelectAssetDirectory) {
+            try {
+                const payload = await window.go.main.App.SelectAssetDirectory();
+                this.processAssetPayload(payload);
             } catch (err) {
                 console.error("Failed to load asset directory:", err);
             }
         } else {
             alert("Asset Library requires the native Wails Desktop build running.");
         }
+    }
+
+    processAssetPayload(payload) {
+        if (!payload || !payload.assets || payload.assets.length === 0) return;
+        
+        const images = payload.assets.filter(a => a.type === 'image');
+        const audio = payload.assets.filter(a => a.type === 'audio');
+        
+        this.globalAssets = { images, audio };
+        this.mountedAssetDirectory = payload.directory;
+
+        const audioPromises = audio.map(async (a) => {
+            try {
+                const res = await fetch(a.data);
+                const blob = await res.blob();
+                this.audioBlobs[a.name] = blob;
+            } catch (e) {
+                console.error(`Failed to fetch local audio: ${a.name}`);
+            }
+        });
+        
+        Promise.all(audioPromises).then(() => {
+            this.updateTrigger++;
+        });
     }
 
     addProp(x, y, imageURL, name) {
