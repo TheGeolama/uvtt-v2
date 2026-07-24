@@ -190,29 +190,36 @@
       const toPixelY = (gy) => (gy - originY) * gridY;
 
       let pixelWalls = [];
-      const addGeom = (items, isPortal) => {
-        items.forEach((item) => {
-          if (isPortal) {
-            // Aggressively check both the root object and nested properties for closure state
-            const t = String(
-              item.type || item.properties?.type || item.portalType || "",
-            ).toLowerCase();
-            const s = String(
-              item.status || item.properties?.status || "",
-            ).toLowerCase();
-            const c =
-              item.closed !== undefined ? item.closed : item.properties?.closed;
 
-            if (
-              t.includes("window") ||
-              s.includes("window") ||
-              s.includes("open") ||
-              s.includes("broken") ||
-              c === false ||
-              c === "false"
-            ) {
-              return; // Let light pass through! Do not add this geometry to the light blockers.
-            }
+      const addGeom = (items) => {
+        items.forEach((item) => {
+          // 1. Deep scan the entire object for any property indicating it should pass light
+          const propsStr = JSON.stringify(item.properties || {}).toLowerCase();
+          const typeStr = String(item.type || "").toLowerCase();
+          const statusStr = String(item.status || "").toLowerCase();
+          const isExplicitlyOpen =
+            item.closed === false || item.properties?.closed === false;
+
+          if (
+            typeStr.includes("window") ||
+            statusStr.includes("window") ||
+            propsStr.includes("window") ||
+            typeStr.includes("transparent") ||
+            propsStr.includes("transparent") ||
+            typeStr.includes("invisible") ||
+            propsStr.includes("invisible") ||
+            statusStr.includes("open") ||
+            propsStr.includes("open") ||
+            statusStr.includes("broken") ||
+            propsStr.includes("broken") ||
+            isExplicitlyOpen ||
+            propsStr.includes('"blocksvision":false') ||
+            propsStr.includes('"blocks_vision":false') ||
+            propsStr.includes('"blockslight":false') ||
+            propsStr.includes('"blocks_light":false') ||
+            propsStr.includes('"light":"pass"')
+          ) {
+            return; // ABORT: Do not add this geometry to the light-blocking array!
           }
 
           if (!item.path || item.path.length < 2) return;
@@ -228,8 +235,9 @@
         });
       };
 
-      addGeom(geometry.walls || [], false);
-      addGeom(geometry.portals || [], true);
+      // 2. Scan BOTH walls and portals, just in case the parser sorted windows into walls
+      addGeom(geometry.walls || []);
+      addGeom(geometry.portals || []);
 
       visionEngine.updateGeometry(pixelWalls);
 
