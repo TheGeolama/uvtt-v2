@@ -243,13 +243,31 @@
 
       if (vision?.enabled && vision.token) {
         visionEngine.fowSprite.alpha = 0.95; // Player view mask opacity
-        visionEngine.renderVision([
+
+        // --- ADD ALL LIGHT SOURCES ---
+        let allLightSources = [
           {
             x: toPixelX(vision.token.x),
             y: toPixelY(vision.token.y),
-            radius: 3000, // Large radius to simulate full sightline to boundaries
+            radius: 3000, // Large radius to simulate full sightline for the player token
           },
-        ]);
+        ];
+
+        // Gather placed map lights to punch ambient holes in the Fog of War
+        const mapLights = manifest.entities?.lights || [];
+        mapLights.forEach((light) => {
+          const bRad = Number(light.properties?.radius?.bright) || 0;
+          const dRad = Number(light.properties?.radius?.dim) || 0;
+          const maxRad = Math.max(bRad, dRad) || 5; // Default to 5 squares if undefined
+
+          allLightSources.push({
+            x: toPixelX(light.position.x),
+            y: toPixelY(light.position.y),
+            radius: maxRad * gridX, // Convert grid units to pixels
+          });
+        });
+
+        visionEngine.renderVision(allLightSources);
       } else {
         // GM View - clear fog of war
         visionEngine.fowSprite.alpha = 0.0;
