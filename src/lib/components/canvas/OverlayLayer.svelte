@@ -31,6 +31,12 @@
 
   $effect(() => {
     let _ = mapStore.redrawTick; // Tie into master refresh cycle
+
+    // We bind to these props so Svelte natively re-runs this effect
+    // the exact millisecond the mouse moves and updates draftingPreview
+    let _preview = draftingPreview;
+    let _path = draftingPath;
+
     if (!isReady || !mapStore.activeMap) return;
 
     // Clear all previous overlay graphics
@@ -42,104 +48,114 @@
     const gridY = Number(res.pixels_per_grid_y) || gridX;
     const originX = Number(res.map_origin[0]) || 0;
     const originY = Number(res.map_origin[1]) || 0;
-    const activeTool = mapStore.activeTool;
 
-    // 1. Draw Bounding Box Selection
+    // 1. Draw Selection Box
     if (isBoxSelecting && boxSelectStart && boxSelectEnd) {
-      const boxGfx = new PIXI.Graphics();
-      layerContainer.addChild(boxGfx);
+      const selectGfx = new PIXI.Graphics();
+      layerContainer.addChild(selectGfx);
 
-      const sx = (boxSelectStart.x - originX) * gridX;
-      const sy = (boxSelectStart.y - originY) * gridY;
-      const ex = (boxSelectEnd.x - originX) * gridX;
-      const ey = (boxSelectEnd.y - originY) * gridY;
+      const minX = Math.min(boxSelectStart.x, boxSelectEnd.x);
+      const minY = Math.min(boxSelectStart.y, boxSelectEnd.y);
+      const w = Math.abs(boxSelectEnd.x - boxSelectStart.x);
+      const h = Math.abs(boxSelectEnd.y - boxSelectStart.y);
 
-      boxGfx.rect(
-        Math.min(sx, ex),
-        Math.min(sy, ey),
-        Math.abs(ex - sx),
-        Math.abs(ey - sy),
+      selectGfx.rect(
+        (minX - originX) * gridX,
+        (minY - originY) * gridY,
+        w * gridX,
+        h * gridY,
       );
-      boxGfx.fill({ color: 0x00f0ff, alpha: 0.1 });
-      boxGfx.stroke({ width: 1, color: 0x00f0ff, alpha: 0.8 });
+      selectGfx.fill({ color: 0x38bdf8, alpha: 0.1 });
+      selectGfx.stroke({ width: 1, color: 0x38bdf8, alpha: 0.8 });
     }
 
-    // 2. Draw Grid Alignment Tool Boxes
-    if (
-      mapStore.gridAlignBoxes.length > 0 ||
-      (isGridAligning && alignBoxStart && alignBoxEnd)
-    ) {
+    // 2. Draw Grid Alignment Box
+    if (isGridAligning && alignBoxStart && alignBoxEnd) {
       const alignGfx = new PIXI.Graphics();
       layerContainer.addChild(alignGfx);
 
-      const offX = Number(res.map_offset_x) || 0;
-      const offY = Number(res.map_offset_y) || 0;
-
-      mapStore.gridAlignBoxes.forEach((b) => {
-        alignGfx.rect(
-          Math.min(b.sx, b.ex) + offX,
-          Math.min(b.sy, b.ey) + offY,
-          Math.abs(b.ex - b.sx),
-          Math.abs(b.ey - b.sy),
-        );
-        alignGfx.fill({ color: 0x22c55e, alpha: 0.2 });
-        alignGfx.stroke({ width: 2, color: 0x22c55e, alpha: 0.8 });
+      alignGfx.rect(
+        Math.min(alignBoxStart.x, alignBoxEnd.x),
+        Math.min(alignBoxStart.y, alignBoxEnd.y),
+        Math.abs(alignBoxEnd.x - alignBoxStart.x),
+        Math.abs(alignBoxEnd.y - alignBoxStart.y),
+      );
+      alignGfx.fill({ color: 0xeab308, alpha: 0.3 });
+      alignGfx.stroke({
+        width: 2,
+        color: 0xeab308,
+        alpha: 0.9,
+        dash: [5, 5],
       });
-
-      if (isGridAligning && alignBoxStart && alignBoxEnd) {
-        alignGfx.rect(
-          Math.min(alignBoxStart.x, alignBoxEnd.x) + offX,
-          Math.min(alignBoxStart.y, alignBoxEnd.y) + offY,
-          Math.abs(alignBoxEnd.x - alignBoxStart.x),
-          Math.abs(alignBoxEnd.y - alignBoxStart.y),
-        );
-        alignGfx.fill({ color: 0xeab308, alpha: 0.3 });
-        alignGfx.stroke({
-          width: 2,
-          color: 0xeab308,
-          alpha: 0.9,
-          dash: [5, 5],
-        });
-      }
     }
 
     // 3. Draw Drafting Lines (Walls, Portals, Roofs in progress)
-    if (draftingPath.length > 0) {
+    if (draftingPath.length > 0 || draftingPreview) {
       const draftGfx = new PIXI.Graphics();
       layerContainer.addChild(draftGfx);
 
-      const pts = draftingPreview
-        ? [...draftingPath, draftingPreview]
-        : [...draftingPath];
-      const dColor =
-        activeTool === "wall"
-          ? 0x00f0ff
-          : activeTool === "roof"
-            ? 0x22c55e
-            : 0xffa500;
+      const activeTool = mapStore.activeTool;
 
-      if (pts.length >= 2) {
-        for (let i = 0; i < pts.length; i++) {
-          const px = (Number(pts[i].x) - originX) * gridX;
-          const py = (Number(pts[i].y) - originY) * gridY;
-          if (isNaN(px) || isNaN(py)) continue;
-          if (i === 0) draftGfx.moveTo(px, py);
-          else draftGfx.lineTo(px, py);
+      // Determine UX Color based on active tool
+      let dColor = 0x38bdf8; // Blue for Walls
+      if (activeTool === "portal") dColor = 0x22c55e; // Green for Portals
+      if (activeTool === "roof" || activeTool === "overhead") dColor = 0xeab308; // Yellow for Roofs
+
+      // --- Draw the committed points ---
+      if (draftingPath.length > 0) {
+        draftGfx.moveTo(
+          (Number(draftingPath[0].x) - originX) * gridX,
+          (Number(draftingPath[0].y) - originY) * gridY,
+        );
+
+        for (let i = 1; i < draftingPath.length; i++) {
+          draftGfx.lineTo(
+            (Number(draftingPath[i].x) - originX) * gridX,
+            (Number(draftingPath[i].y) - originY) * gridY,
+          );
         }
 
-        if (activeTool === "roof" && pts.length > 2) draftGfx.closePath();
+        draftGfx.stroke({ width: 3, color: dColor, alpha: 1.0 });
 
-        draftGfx.stroke({
-          width: 4,
-          color: dColor,
-          alpha: 0.6,
-          join: "round",
-          cap: "round",
-        });
-
-        if (activeTool === "roof" && pts.length > 2) {
-          draftGfx.fill({ color: dColor, alpha: 0.2 });
+        // Draw hard white dots for committed vertices
+        for (let i = 0; i < draftingPath.length; i++) {
+          draftGfx
+            .circle(
+              (Number(draftingPath[i].x) - originX) * gridX,
+              (Number(draftingPath[i].y) - originY) * gridY,
+              4,
+            )
+            .fill({ color: 0xffffff, alpha: 1.0 });
         }
+      }
+
+      // --- Draw the Live Rubber-Band Line ---
+      if (draftingPath.length > 0 && draftingPreview) {
+        const lastPt = draftingPath[draftingPath.length - 1];
+        const startX = (Number(lastPt.x) - originX) * gridX;
+        const startY = (Number(lastPt.y) - originY) * gridY;
+        const endX = (Number(draftingPreview.x) - originX) * gridX;
+        const endY = (Number(draftingPreview.y) - originY) * gridY;
+
+        const rbGfx = new PIXI.Graphics();
+        rbGfx.moveTo(startX, startY).lineTo(endX, endY);
+        // Dashed line to indicate it is pending/uncommitted
+        rbGfx.stroke({ width: 2.5, color: dColor, alpha: 0.7, dash: [8, 8] });
+        layerContainer.addChild(rbGfx);
+      }
+
+      // --- Draw the Snap Halo at the Cursor ---
+      if (draftingPreview) {
+        const px = (Number(draftingPreview.x) - originX) * gridX;
+        const py = (Number(draftingPreview.y) - originY) * gridY;
+
+        // The targeting outer ring (Halo)
+        draftGfx
+          .circle(px, py, 14)
+          .stroke({ width: 2, color: dColor, alpha: 0.6 });
+
+        // The core focal point
+        draftGfx.circle(px, py, 5).fill({ color: dColor, alpha: 1.0 });
       }
     }
   });
