@@ -437,6 +437,26 @@
   function handleDrop(e) {
     e.preventDefault();
 
+    // 1. Check for internal JSON payload first!
+    const dataStr = e.dataTransfer.getData("application/json");
+    if (dataStr) {
+      try {
+        const data = JSON.parse(dataStr);
+        if (data.type === "asset_prop") {
+          const coords = getGridCoordinates(
+            e.clientX,
+            e.clientY,
+            true,
+            "select",
+          );
+          mapStore.addProp(coords.exactX, coords.exactY, data.image, data.name);
+          if (activeTool !== "select") mapStore.setTool("select");
+          return; // Exit early to prevent the file drop logic from firing
+        }
+      } catch (err) {}
+    }
+
+    // 2. If it's not an internal prop drag, handle it as an external file drop
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
       const ext = file.name.split(".").pop().toLowerCase();
@@ -451,17 +471,6 @@
         return;
       }
     }
-
-    const dataStr = e.dataTransfer.getData("application/json");
-    if (!dataStr) return;
-    try {
-      const data = JSON.parse(dataStr);
-      if (data.type === "asset_prop") {
-        const coords = getGridCoordinates(e.clientX, e.clientY, true, "select");
-        mapStore.addProp(coords.exactX, coords.exactY, data.image, data.name);
-        if (activeTool !== "select") mapStore.setTool("select");
-      }
-    } catch (err) {}
   }
 
   function handlePointerDown(e) {
