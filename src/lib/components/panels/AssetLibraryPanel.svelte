@@ -161,6 +161,9 @@
                   type: "asset_prop",
                   image: img.data,
                   name: filename,
+                  // Capture the native pixel dimensions directly from the DOM image
+                  naturalWidth: e.target.naturalWidth,
+                  naturalHeight: e.target.naturalHeight,
                 };
 
                 // 2. We still must set some data to satisfy the HTML5 Drag-and-Drop API rules

@@ -444,7 +444,24 @@
     ) {
       const data = window.__uvttDraggedAsset;
       const coords = getGridCoordinates(e.clientX, e.clientY, true, "select");
+
       mapStore.addProp(coords.exactX, coords.exactY, data.image, data.name);
+
+      // --- SMART TOKEN SCALING ---
+      // Auto-scale the dropped image so its longest edge fits exactly 1 grid square (e.g., 5x5ft)
+      const propsArray = activeMap?.manifest?.entities?.props || [];
+      if (propsArray.length > 0 && data.naturalWidth && data.naturalHeight) {
+        const newProp = propsArray[propsArray.length - 1];
+        const maxDim = Math.max(data.naturalWidth, data.naturalHeight);
+
+        // Calculate scale percentage (e.g., 70px grid / 140px native image = 0.5 * 100 = 50% scale)
+        const gridFitScale = (coords.gridX / maxDim) * 100;
+        newProp.scale = Math.round(gridFitScale);
+
+        // Force rendering layers to sync the new scale instantly
+        mapStore.updateTrigger++;
+      }
+
       if (activeTool !== "select") mapStore.setTool("select");
       window.__uvttDraggedAsset = null; // Clean up memory
       return; // Exit early so it doesn't trigger the file drop logic!
