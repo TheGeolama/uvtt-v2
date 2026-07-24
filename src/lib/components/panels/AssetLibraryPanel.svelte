@@ -234,37 +234,33 @@
     justify-content: center;
   }
   .action-btn.wave {
-    background: #3b82f622;
-    border-color: #3b82f6;
-    color: #93c5fd;
+    background: rgba(56, 189, 248, 0.1);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+  }
+  .action-btn.wave:hover {
+    background: rgba(56, 189, 248, 0.2);
   }
   .action-btn.secure {
-    background: #a855f722;
-    border-color: #a855f7;
-    color: #d8b4fe;
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #fcd34d;
   }
-
-  /* Genre Filter Styles */
   .genre-filter {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 12px;
+    align-items: center;
+    gap: 8px;
     font-size: 11px;
-    color: #cbd5e1;
-    font-weight: 600;
+    color: #94a3b8;
+    margin-top: 12px;
   }
   .genre-filter select {
     background: #0f172a;
     border: 1px solid #334155;
-    color: #e2e8f0;
-    padding: 6px;
+    color: #fff;
+    padding: 4px 8px;
     border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
     outline: none;
-  }
-  .genre-filter select:focus {
-    border-color: #00f0ff;
+    flex: 1;
   }
 </style>

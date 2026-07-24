@@ -9,21 +9,23 @@
   import EntitiesLayer from "./canvas/EntitiesLayer.svelte";
   import ShadowLayer from "./canvas/ShadowLayer.svelte";
   import OverlayLayer from "./canvas/OverlayLayer.svelte";
+  import { VisionEngine } from "./canvas/VisionEngine.js";
 
   let canvasContainer;
   let pixiApp;
   let viewportContainer = $state.raw();
-  let mapSprite;
   let overlayContainer = $state.raw();
+  let mapSprite;
+  let visionEngine = $state.raw(null);
 
   // --- REACTIVE VIEWPORT STATE ---
   let scale = $state(1);
   let panX = $state(0);
   let panY = $state(0);
-
   let currentMapId = null;
   let currentMapUrl = ""; // Tracks the loaded texture URL for safe unloading
   let isPanning = $state(false);
+
   let dragStart = { x: 0, y: 0 };
   let originalPan = { x: 0, y: 0 };
 
@@ -47,6 +49,7 @@
   let isSpacePressed = $state(false);
   let isPixiReady = $state(false);
   let isDraggingVisionToken = $state(false);
+
   // Coordinate HUD is now hidden by default
   let showGridHUD = $state(false);
 
@@ -76,7 +79,6 @@
     pixiApp.canvas.style.position = "absolute";
     pixiApp.canvas.style.top = "0";
     pixiApp.canvas.style.left = "0";
-
     pixiApp.canvas.style.zIndex = "1";
     canvasContainer.appendChild(pixiApp.canvas);
 
@@ -94,6 +96,9 @@
   });
 
   onDestroy(() => {
+    if (visionEngine) {
+      visionEngine.destroy();
+    }
     if (mapSprite) {
       mapSprite.texture = PIXI.Texture.EMPTY;
     }
@@ -120,7 +125,7 @@
     applyOffsetsAndScale(safeManifest);
   });
 
-  // --- REAL-TIME SPATIAL AUDIO EFFECT ---
+  // --- REAL-TIME SPATIAL AUDIO & DYNAMIC LIGHTING EFFECT ---
   $effect(() => {
     // We bind explicitly to these runes. If any of them change, this effect instantly re-fires.
     const tick = mapStore.updateTrigger;
@@ -154,7 +159,6 @@
       const gridY = Number(manifest.resolution?.pixels_per_grid_y) || gridX;
       const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
       const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
-
       const cw = window.innerWidth;
       const ch = window.innerHeight;
 
@@ -174,13 +178,67 @@
         mapStore.updateTrigger++;
       },
     );
+
+    // ---- VISION ENGINE SYNC ----
+    if (visionEngine) {
+      const gridX = Number(manifest.resolution?.pixels_per_grid) || 70;
+      const gridY = Number(manifest.resolution?.pixels_per_grid_y) || gridX;
+      const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
+      const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
+
+      const toPixelX = (gx) => (gx - originX) * gridX;
+      const toPixelY = (gy) => (gy - originY) * gridY;
+
+      let pixelWalls = [];
+      const addGeom = (items, isClosedPortal) => {
+        items.forEach((item) => {
+          // Windows and broken doors let light through
+          if (
+            isClosedPortal &&
+            (item.properties?.status === "open" ||
+              item.properties?.status === "broken" ||
+              item.properties?.status === "window")
+          )
+            return;
+          if (!item.path || item.path.length < 2) return;
+          for (let i = 0; i < item.path.length - 1; i++) {
+            pixelWalls.push({
+              p1: { x: toPixelX(item.path[i].x), y: toPixelY(item.path[i].y) },
+              p2: {
+                x: toPixelX(item.path[i + 1].x),
+                y: toPixelY(item.path[i + 1].y),
+              },
+            });
+          }
+        });
+      };
+
+      addGeom(geometry.walls || [], false);
+      addGeom(geometry.portals || [], true);
+
+      visionEngine.updateGeometry(pixelWalls);
+
+      if (vision?.enabled && vision.token) {
+        visionEngine.fowSprite.alpha = 0.95; // Player view mask opacity
+        visionEngine.renderVision([
+          {
+            x: toPixelX(vision.token.x),
+            y: toPixelY(vision.token.y),
+            radius: 3000, // Large radius to simulate full sightline to boundaries
+          },
+        ]);
+      } else {
+        // GM View - clear fog of war
+        visionEngine.fowSprite.alpha = 0.0;
+        visionEngine.renderVision([]);
+      }
+    }
   });
 
   function handleResize() {
     if (!activeMap) return;
     const cw = window.innerWidth;
     const ch = window.innerHeight;
-
     if (lastWindowWidth > 0 && lastWindowHeight > 0) {
       panX += (cw - lastWindowWidth) / 2;
       panY += (ch - lastWindowHeight) / 2;
@@ -213,6 +271,27 @@
     try {
       mapSprite.texture = await PIXI.Assets.load(url);
       applyOffsetsAndScale(manifest);
+
+      // 4. Initialize Vision Engine to exact map pixel bounds
+      if (visionEngine) {
+        visionEngine.destroy();
+        visionEngine = null;
+      }
+      const res = manifest.resolution;
+      const gridX = Number(res.pixels_per_grid) || 70;
+      const gridY = Number(res.pixels_per_grid_y) || gridX;
+      const mapW = res.map_size[0] * gridX;
+      const mapH = res.map_size[1] * gridY;
+
+      visionEngine = new VisionEngine(pixiApp, mapW, mapH, viewportContainer);
+
+      // Ensure overlay stays on top of the newly appended Fog of War
+      if (viewportContainer && overlayContainer) {
+        viewportContainer.setChildIndex(
+          overlayContainer,
+          viewportContainer.children.length - 1,
+        );
+      }
     } catch (err) {
       console.error("Failed to load texture", err);
     }
@@ -220,14 +299,11 @@
 
   function applyOffsetsAndScale(manifest) {
     if (!mapSprite || mapSprite.texture === PIXI.Texture.EMPTY) return;
-
     const res = manifest.resolution;
     const gridX = Number(res.pixels_per_grid) || 70;
     const gridY = Number(res.pixels_per_grid_y) || gridX;
-
     mapSprite.width = res.map_size[0] * gridX;
     mapSprite.height = res.map_size[1] * gridY;
-
     mapSprite.position.set(
       Number(res.map_offset_x) || 0,
       Number(res.map_offset_y) || 0,
@@ -242,14 +318,11 @@
 
     const mapWidth = res.map_size[0] * gridX;
     const mapHeight = res.map_size[1] * gridY;
-
     const cw = window.innerWidth;
     const ch = window.innerHeight;
     scale = Math.min((cw - 100) / mapWidth, (ch - 100) / mapHeight, 1);
-
     panX = (cw - mapWidth * scale) / 2;
     panY = (ch - mapHeight * scale) / 2;
-
     mapStore.zoomScale = Math.round(scale * 100);
     updateViewport();
   }
@@ -267,26 +340,20 @@
 
     for (const wall of walls) {
       if (!wall.path || wall.path.length < 2) continue;
-
       for (let i = 0; i < wall.path.length - 1; i++) {
         const x1 = Number(wall.path[i].x);
         const y1 = Number(wall.path[i].y);
         const x2 = Number(wall.path[i + 1].x);
         const y2 = Number(wall.path[i + 1].y);
-
         const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
         if (l2 === 0) continue;
-
         let t = Math.max(
           0,
           Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2),
         );
-
         const projX = x1 + t * (x2 - x1);
         const projY = y1 + t * (y2 - y1);
-
         const distSq = (px - projX) ** 2 + (py - projY) ** 2;
-
         if (distSq < closestDist) {
           closestDist = distSq;
           snapPoint = { x: projX, y: projY };
@@ -299,20 +366,16 @@
   function getGridCoordinates(clientX, clientY, e_shiftKey, currentToolAction) {
     if (!activeMap)
       return { exactX: 0, exactY: 0, snapX: 0, snapY: 0, gridX: 70, gridY: 70 };
-
     const rect = canvasContainer.getBoundingClientRect();
     const manifest = activeMap.manifest;
     const gridX = Number(manifest.resolution?.pixels_per_grid) || 70;
     const gridY = Number(manifest.resolution?.pixels_per_grid_y) || gridX;
-
     const unitsPerGrid = Math.max(
       1,
       Number(manifest.resolution?.units_per_grid) || 5,
     );
-
     const originX = Number(manifest.resolution?.map_origin?.[0]) || 0;
     const originY = Number(manifest.resolution?.map_origin?.[1]) || 0;
-
     const exactX = (clientX - rect.left - panX) / scale / gridX + originX;
     const exactY = (clientY - rect.top - panY) / scale / gridY + originY;
 
@@ -320,7 +383,6 @@
     let snapY = exactY;
     let isVectorSnapped = false;
     let draggedCategory = null;
-
     if (currentToolAction === "select" && draggedItemId) {
       if (manifest.entities?.lights?.some((i) => i.id === draggedItemId))
         draggedCategory = "light";
@@ -341,14 +403,11 @@
     }
 
     const effectiveAction = draggedCategory || currentToolAction;
-
     const isFreeTool = ["light", "audio", "emitter", "prop"].includes(
       effectiveAction,
     );
-
     const isCenterSnapTool = ["spawn", "event"].includes(effectiveAction);
     const shouldSnap = isFreeTool ? e_shiftKey : !e_shiftKey;
-
     if (isCenterSnapTool && shouldSnap) {
       snapX = Math.floor(exactX) + 0.5;
       snapY = Math.floor(exactY) + 0.5;
@@ -360,7 +419,6 @@
         manifest.geometry?.walls || [],
         0.5 / unitsPerGrid,
       );
-
       if (edgeSnap) {
         snapX = edgeSnap.x;
         snapY = edgeSnap.y;
@@ -396,7 +454,6 @@
 
     const dataStr = e.dataTransfer.getData("application/json");
     if (!dataStr) return;
-
     try {
       const data = JSON.parse(dataStr);
       if (data.type === "asset_prop") {
@@ -409,7 +466,6 @@
 
   function handlePointerDown(e) {
     if (!viewportContainer || !activeMap) return;
-
     // AUDIO ENGINE INIT
     // Browsers strictly block Web Audio until the user clicks/interacts with the page
     if (!audioEngine.isInitialized) {
@@ -423,7 +479,6 @@
       const distSq =
         (coords.exactX - vision.token.x) ** 2 +
         (coords.exactY - vision.token.y) ** 2;
-
       if (distSq < 1.0) {
         isDraggingVisionToken = true;
         return;
@@ -437,9 +492,7 @@
         false,
         activeTool,
       );
-
       const thresholdSq = (15 / scale / coords.gridX) ** 2;
-
       if (e.altKey) {
         if (mapStore.splitVectorNode(coords.exactX, coords.exactY, thresholdSq))
           return;
@@ -453,7 +506,6 @@
 
     if (e.button === 0 && e.altKey && activeTool === "select") {
       const coords = getGridCoordinates(e.clientX, e.clientY, false, "select");
-
       if (
         mapStore.deleteVectorNode(
           coords.exactX,
@@ -507,7 +559,6 @@
         e.shiftKey,
         currentToolAction,
       );
-
       currentGridX = coords.snapX;
       currentGridY = coords.snapY;
 
@@ -532,7 +583,6 @@
         let closestItem = null,
           closestNodeIndex = null;
         let minGridDistSq = (15 / scale / coords.gridX) ** 2;
-
         const candidates =
           mapStore.quadtree?.retrieve({
             x: coords.exactX - 1,
@@ -578,7 +628,6 @@
               }
             });
           };
-
           const checkGeomSegments = (items) => {
             items.forEach((item) => {
               if (!item.path || item.path.length < 2) return;
@@ -681,7 +730,7 @@
 
     if (isDraggingVisionToken) {
       mapStore.updateVisionToken(coords.exactX, coords.exactY);
-      // Force audio nodes to update continuously while dragging!
+      // Force audio and vision nodes to update continuously while dragging!
       mapStore.updateTrigger++;
       return;
     }
@@ -699,7 +748,6 @@
 
     currentGridX = coords.snapX;
     currentGridY = coords.snapY;
-
     if (isBoxSelecting) {
       boxSelectEnd = { x: coords.exactX, y: coords.exactY };
       return;
@@ -741,7 +789,6 @@
     draggedItemId = null;
     draggedNodeIndex = null;
     lastDragGrid = null;
-
     if (isGridAligning && alignBoxStart && alignBoxEnd) {
       if (
         Math.abs(alignBoxEnd.x - alignBoxStart.x) > 5 &&
@@ -772,13 +819,11 @@
       const hits = [];
 
       const inBox = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
-
       const checkEntities = (items, getPos) =>
         items.forEach((item) => {
           const p = getPos(item);
           if (p && inBox(p.x, p.y)) hits.push(item.id);
         });
-
       const checkGeometries = (items) =>
         items.forEach((item) => {
           if (
@@ -787,37 +832,30 @@
           )
             hits.push(item.id);
         });
-
       checkEntities(manifest.entities?.lights || [], (i) => ({
         x: Number(i.position?.x),
         y: Number(i.position?.y),
       }));
-
       checkEntities(manifest.entities?.audio?.zones || [], (i) => ({
         x: Number(i.center?.x),
         y: Number(i.center?.y),
       }));
-
       checkEntities(manifest.entities?.events || [], (i) => ({
         x: Number(i.trigger_bounds?.center?.x),
         y: Number(i.trigger_bounds?.center?.y),
       }));
-
       checkEntities(manifest.entities?.landing_zones || [], (i) => ({
         x: Number(i.coordinates?.[0]),
         y: Number(i.coordinates?.[1]),
       }));
-
       checkEntities(manifest.entities?.emitters || [], (i) => ({
         x: Number(i.position?.x),
         y: Number(i.position?.y),
       }));
-
       checkEntities(manifest.entities?.props || [], (i) => ({
         x: Number(i.position?.x),
         y: Number(i.position?.y),
       }));
-
       checkGeometries(manifest.geometry?.walls || []);
       checkGeometries(manifest.geometry?.portals || []);
       checkGeometries(manifest.geometry?.overhead || []);
@@ -834,10 +872,8 @@
     const rect = canvasContainer.getBoundingClientRect();
     const pointerX = e.clientX - rect.left;
     const pointerY = e.clientY - rect.top;
-
     const zoom = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = scale * zoom;
-
     panX = pointerX - (pointerX - panX) * (newScale / scale);
     panY = pointerY - (pointerY - panY) * (newScale / scale);
     scale = newScale;
@@ -847,7 +883,6 @@
 
   function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-
     if (e.code === "Space") {
       e.preventDefault();
       isSpacePressed = true;
