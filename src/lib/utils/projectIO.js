@@ -312,12 +312,32 @@ export async function buildUVTT2Archive(catalog, audioBlobs = {}) {
     return zip.generateAsync({ type: "blob" });
 }
 
-export function saveProject(store) {
-    const projectData = JSON.parse(JSON.stringify({
+export async function saveProject(store) {
+    const projectData = {
         catalog: store.catalog,
         activeMapId: store.activeMapId
-    }));
-    downloadJSON('my_map.uvtt-proj', projectData);
+    };
+    
+    const defaultFilename = `${store.activeMap?.filename || 'My_Project'}.uvtt-proj`;
+
+    // 1. Native OS Hook (Desktop Pro build via Wails)
+    if (typeof window !== 'undefined' && window.go?.main?.App?.SaveProject) {
+        try {
+            const payloadString = JSON.stringify(projectData);
+            const savedPath = await window.go.main.App.SaveProject(payloadString, defaultFilename);
+            if (savedPath) {
+                console.log(`Successfully saved project natively to: ${savedPath}`);
+                return; // Early return, OS handled the file write completely
+            }
+        } catch (err) {
+            console.error("Native OS Save Dialog was canceled or failed:", err);
+            // If the user simply closed the dialog, we shouldn't force a browser download.
+            return;
+        }
+    }
+
+    // 2. Legacy Browser Fallback (If not running in the Wails wrapper)
+    downloadJSON(defaultFilename, projectData);
 }
 
 export function exportVTT(store) {
